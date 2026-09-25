@@ -19,15 +19,16 @@ test('Magic insufficient GEM fails without mutation', () => {
   assert.equal(st.players[0].magicUsed.Normal, undefined);
 });
 
-test('Magic ignores GEM colors in v3.2 and pays successfully', () => {
+test('Magic wrong-color fails without mutation', () => {
   const { E } = H.loadAll();
   const st = H.newEmptyGame(E);
   const m = H.mkInst(H.mkDb({ name: 'M', print: 'TM2', type: 'Magic', subtype: 'Normal', cost: 1, color: 'แดง', mainEffect: 'จั่ว 1' }), 0);
   const g = H.mkInst(H.mkDb({ name: 'G', print: 'G', type: 'Avatar', gem: 1, gemColor: 'ฟ้า' }), 0);
   H.giveHand(st, 0, [m, g]);
+  const before = H.snapshot(st);
   const r = E.playMagic(st, 0, m.uid, { payUids: [g.uid] });
-  assert.equal(r.ok, true);
-  assert.equal(st.players[0].hand.length, 0); // Both magic and payment gone from hand
+  assert.equal(r.ok, false);
+  assert.equal(H.snapshot(st), before);
 });
 
 test('Magic duplicate GEM fails without mutation', () => {

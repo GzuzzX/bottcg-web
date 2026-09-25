@@ -881,7 +881,6 @@
       if (ab.condData) {
         const cd = ab.condData;
         if (cd.podi && !inst._podi) return;
-          if (cd.byCost && !(ctx && ctx.byCost === true)) return;
         if (cd.byEffect && !(ctx && ctx.byCost === false)) return;
         if (cd.fromZone && !(ctx && ctx.fromZone === cd.fromZone)) return;
         if (cd.forTarget && !(ctx && ctx.targetName && ctx.targetName.includes(cd.forTarget))) return;

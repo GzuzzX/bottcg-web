@@ -187,51 +187,47 @@
   // ---------- Cost payment (Avatar/Construct) ----------
   // returns {ok, error, pay:[inst]} — caller removes pay from hand to hell
   // Atomic: mutation-free validation; checks ownership, duplicates, stale, self, color, limits, bans, quantities.
-  function checkPay(st, p, needCost, needColor, payList, payTargetName, excludeUid, isMagic = false) {
+  function checkPay(st, p, needCost, needColor, payList, payTargetName, excludeUid) {
     payList = payList || [];
     if (needCost === 0) {
-      if (payList.length) return { ok: false, error: 'ไม่ต้องจ่ายแต่เลือกการ์ดมา' };
+      if (payList.length) return { ok: false, error: 'ไม่ต้องจ่ายแต่เลือก GEM มา' };
       return { ok: true, pay: [] };
     }
-    if (!payList.length) return { ok: false, error: isMagic ? 'ไม่ได้เลือกการ์ดทิ้งจ่าย Cost (0/' + needCost + ')' : 'GEM ไม่พอ (0/' + needCost + ')' };
+    if (!payList.length) return { ok: false, error: 'GEM ไม่พอ (0/' + needCost + ')' };
     const seen = {};
     for (const c of payList) {
-      if (!c) return { ok: false, error: 'การ์ดที่เลือกไม่ถูกต้อง (stale)' };
-      if (seen[c.uid]) return { ok: false, error: 'เลือกการ์ดซ้ำ' };
+      if (!c) return { ok: false, error: 'GEM ที่เลือกไม่ถูกต้อง (stale)' };
+      if (seen[c.uid]) return { ok: false, error: 'เลือก GEM ซ้ำ' };
       seen[c.uid] = true;
       if (excludeUid && c.uid === excludeUid) return { ok: false, error: 'ใช้การ์ดตัวเองจ่ายไม่ได้' };
-      if (p.hand.indexOf(c) < 0) return { ok: false, error: 'การ์ดไม่อยู่บนมือ (stale)' };
-      if (!isMagic && (c.db.gem || 0) <= 0) return { ok: false, error: 'การ์ด GEM 0 ทิ้งจ่ายไม่ได้' };
+      if (p.hand.indexOf(c) < 0) return { ok: false, error: 'GEM ไม่อยู่บนมือ (stale)' };
+      if ((c.db.gem || 0) <= 0) return { ok: false, error: 'การ์ด GEM 0 ทิ้งจ่ายไม่ได้' };
     }
     const gems = payList.slice();
-    for (const c of gems) {
-      if (c.db.name === payTargetName) return { ok: false, error: 'ห้ามใช้การ์ดชื่อเดียวกันจ่าย Cost ให้กันและกัน' };
+      for (const c of gems) {
+        if (c.db.name === payTargetName) return { ok: false, error: 'ห้ามใช้การ์ดชื่อเดียวกันจ่าย Cost ให้กันและกัน' };
       const gc = c.db.gemColor || '';
-      if (!isMagic && gc && needColor && gc !== needColor) return { ok: false, error: 'GEM สีไม่ตรง (' + gc + ' ต้องการ ' + needColor + ')' };
+      if (gc && needColor && gc !== needColor) return { ok: false, error: 'GEM สีไม่ตรง (' + gc + ' ต้องการ ' + needColor + ')' };
       const lim = gemLimitFor(c.db);
-      if (!isMagic && lim && lim.names && payTargetName) {
+      if (lim && lim.names && payTargetName) {
         const okName = lim.names.some(n => (payTargetName || '').includes(n));
         if (!okName) return { ok: false, error: c.db.name + ' ใช้จ่ายได้เฉพาะ ' + lim.names.join('/') };
       }
       if (fx('costBanHit', st, c.db, p.idx)) return { ok: false, error: c.db.name + ' ถูกห้ามใช้เป็น Cost (เอฟเฟค)' };
     }
-    if (isMagic) {
-      if (gems.length !== needCost) return { ok: false, error: 'Cost เวทมนตร์ต้องทิ้งไพ่จำนวน ' + needCost + ' ใบ (เลือกมา ' + gems.length + ' ใบ)' };
-    } else {
-      const sum = gems.reduce((s, c) => s + c.db.gem, 0);
-      if (sum < needCost) return { ok: false, error: 'GEM ไม่พอ (' + sum + '/' + needCost + ')' };
-      const min = Math.min.apply(null, gems.map(c => c.db.gem));
-      if (sum - min >= needCost) return { ok: false, error: 'จ่ายเกินโดยไม่จำเป็น (ห้ามจ่ายเพิ่มเมื่อพอแล้ว)' };
-    }
+    const sum = gems.reduce((s, c) => s + c.db.gem, 0);
+    if (sum < needCost) return { ok: false, error: 'GEM ไม่พอ (' + sum + '/' + needCost + ')' };
+    const min = Math.min.apply(null, gems.map(c => c.db.gem));
+    if (sum - min >= needCost) return { ok: false, error: 'จ่ายเกินโดยไม่จำเป็น (ห้ามจ่ายเพิ่มเมื่อพอแล้ว)' };
     return { ok: true, pay: payList.slice() };
   }
-  function payCost(st, p, needCost, needColor, payList, payTargetName, excludeUid, isMagic = false) {
-    const chk = checkPay(st, p, needCost, needColor, payList, payTargetName, excludeUid, isMagic);
+  function payCost(st, p, needCost, needColor, payList, payTargetName, excludeUid) {
+    const chk = checkPay(st, p, needCost, needColor, payList, payTargetName, excludeUid);
     if (!chk.ok) return chk;
     payList.forEach(c => {
       const i = p.hand.indexOf(c);
       if (i >= 0) p.hand.splice(i, 1);
-      p.hell.push(c); // cards paying GEM go via Cost Step
+      p.hell.push(c); // cards paying GEM go via Cost Step (ยังไม่ถือว่านรกจนจ่ายเสร็จ - v1 ส่งนรกเลยหลังผ่าน)
     });
     fx('onPaidAsCost', st, p.idx, payList.slice(), payTargetName || '');
     return { ok: true };
@@ -665,7 +661,7 @@
     if (new Set(rawPay).size !== rawPay.length) return { ok: false, error: 'เลือก GEM ซ้ำ' };
     const payList = rawPay.map(u => p.hand.find(c => c.uid === u));
     if (payList.some(c => !c)) return { ok: false, error: 'GEM ที่เลือกไม่ถูกต้อง (stale)' };
-    const gemChk = checkPay(st, p, needCost, needColor, payList, card.db.name, handUid, true);
+    const gemChk = checkPay(st, p, needCost, needColor, payList, card.db.name, handUid);
     if (!gemChk.ok) return gemChk;
     // 3) Additional-cost picks validation (e.g. SD01-018 discard) before commitment
     let extraCost = null;
@@ -681,7 +677,7 @@
     p.magicUsed[countAs] = (p.magicUsed[countAs] || 0) + 1;
     // GEM commitment
     if (payList.length || needCost > 0) {
-      const pr = payCost(st, p, needCost, needColor, payList, card.db.name, handUid, true);
+      const pr = payCost(st, p, needCost, needColor, payList, card.db.name, handUid);
       if (!pr.ok) {
         // rollback allowance (GEM failed after increment should not happen since pre-validated, but be safe)
         p.magicUsed[countAs] = Math.max(0, (p.magicUsed[countAs] || 1) - 1);

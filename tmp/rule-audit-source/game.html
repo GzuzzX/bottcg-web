@@ -1,0 +1,1137 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Battle of Talingchan — Duel (กติกาจริง)</title>
+<style>
+*{box-sizing:border-box}body{font-family:system-ui,sans-serif;margin:0;background:#0b0b0f;color:#eee}
+header{padding:10px 14px;background:#000;border-bottom:2px solid #fff;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+header h1{margin:0;font-size:16px}
+#phase{font-weight:800;background:#fff;color:#000;padding:6px 12px;border-radius:8px}
+button{padding:10px 12px;font-size:14px;border-radius:8px;border:1px solid #555;background:#222;color:#eee;cursor:pointer}
+button.primary{background:#fff;color:#000;font-weight:800}
+button:disabled{opacity:.4}
+#setup{padding:16px;max-width:640px;margin:0 auto}
+#setup .card{background:#16161c;border-radius:10px;padding:14px;margin:10px 0}
+#board{display:none;padding:10px;max-width:1100px;margin:0 auto}
+.zone{border:1px solid #333;border-radius:10px;padding:8px;margin:8px 0;background:#141419}
+.zone h3{margin:0 0 6px;font-size:13px;color:#aaa}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.mini{width:104px;background:#222;border-radius:8px;overflow:hidden;border:2px solid transparent;cursor:pointer;font-size:11px}
+.mini.sel{border-color:#4ade80}
+.mini.tapped{opacity:.55;transform:rotate(4deg)}
+.mini img{width:100%;aspect-ratio:249/339;object-fit:cover;background:#333;display:block}
+.mini .t{padding:4px;min-height:44px}
+.life{width:84px;height:120px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;border:2px solid #555;background:#2a2a33;cursor:default}
+.life.open{background:#3f6212;border-color:#4ade80}
+#hand .mini{width:120px}
+#log{background:#000;color:#7CFC00;border-radius:8px;padding:10px;font-size:12px;height:220px;overflow:auto;white-space:pre-wrap}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;z-index:30;padding:12px}
+#modal .box{background:#1c1c22;border-radius:12px;max-width:560px;width:100%;padding:14px;max-height:92vh;overflow:auto}
+.pay{display:flex;justify-content:space-between;background:#111;border-radius:6px;padding:6px;margin:4px 0;font-size:13px}
+.pending{background:#332200;border:1px solid #a16207;border-radius:8px;padding:8px;margin:6px 0;font-size:13px}
+.hint{font-size:12px;color:#fbbf24}
+@keyframes cardIn{from{opacity:0;transform:scale(.7)}to{opacity:1;transform:scale(1)}}
+@keyframes cardOut{from{opacity:1;transform:scale(1)}to{opacity:0;transform:scale(.7)}}
+@keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-6px)}40%{transform:translateX(6px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}}
+@keyframes flipIn{from{transform:rotateY(90deg);opacity:0}to{transform:rotateY(0);opacity:1}}
+@keyframes phaseSlide{from{transform:translateY(-10px);opacity:0}to{transform:translateY(0);opacity:1}}
+.anim-in{animation:cardIn .3s ease-out}
+.anim-out{animation:cardOut .3s ease-in forwards}
+.anim-shake{animation:shake .4s ease}
+.anim-flip{animation:flipIn .4s ease-out}
+#phase{animation:phaseSlide .3s ease-out}
+@media(max-width:768px){
+  header{flex-direction:column;align-items:stretch;gap:6px}
+  header h1{font-size:14px}
+  #board{padding:6px}
+  .zone{padding:6px;margin:4px 0}
+  .zone h3{font-size:11px}
+  .row{gap:4px;overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch;padding-bottom:4px}
+  .mini{width:80px;min-width:80px;font-size:10px}
+  .mini .t{padding:3px;min-height:36px}
+  #hand .mini{width:90px;min-width:90px}
+  .life{width:60px;height:85px;font-size:9px;min-width:60px}
+  #log{height:140px;font-size:11px}
+  #modal .box{max-width:95vw;padding:10px}
+  button{padding:8px 10px;font-size:13px}
+  #phase{padding:4px 8px;font-size:13px}
+}
+@media(max-width:480px){
+  .mini{width:68px;min-width:68px}
+  #hand .mini{width:76px;min-width:76px}
+  .life{width:50px;height:70px;font-size:8px;min-width:50px}
+  header h1{font-size:12px}
+}
+/* --- UI OVERHAUL (Master Duel Style) --- */
+body { overflow: hidden; background: #08080a; }
+header { background: #111; border-bottom: 1px solid #333; z-index: 100; position: relative; }
+
+/* Main Container */
+#game-container {
+  display: flex;
+  height: calc(100vh - 50px);
+  width: 100vw;
+  overflow: hidden;
+}
+
+/* Sidebar (Left) */
+#sidebar {
+  width: 320px;
+  background: #111218;
+  border-right: 1px solid #2a2a35;
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  box-shadow: 2px 0 10px rgba(0,0,0,0.5);
+  z-index: 10;
+}
+#card-preview-img { width: 100%; aspect-ratio: 249/339; background: #000; border-radius: 8px; object-fit: contain; margin-bottom: 10px; }
+#card-preview-text { flex: 1; overflow-y: auto; font-size: 13px; color: #ddd; background: #0a0a0c; padding: 10px; border-radius: 6px; border: 1px solid #222; }
+#card-preview-text h3 { margin: 0 0 8px; color: #fff; font-size: 16px; border-bottom: 1px solid #333; padding-bottom: 4px; }
+
+/* Playmat (Right) */
+#board {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  background: radial-gradient(circle at center, #1a1a24 0%, #050508 100%);
+  overflow-y: auto;
+  position: relative;
+}
+
+/* Playmat Zones */
+.field-half { display: flex; flex-direction: column; gap: 8px; flex: 1; justify-content: center; }
+.field-row { display: flex; justify-content: center; gap: 10px; align-items: center; }
+
+/* Zone Styling */
+.zone-box {
+  border: 2px dashed #334;
+  border-radius: 8px;
+  min-width: 80px;
+  min-height: 110px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255,255,255,0.02);
+}
+.row { gap: 6px; justify-content: center; width: 100%; min-height: 110px; align-items: center; }
+
+/* Center Area */
+.center-field { display: flex; justify-content: space-between; align-items: center; margin: 15px 0; padding: 10px; background: rgba(0,0,0,0.3); border-radius: 10px; border: 1px solid #222; }
+#pend { display: flex; gap: 5px; flex: 1; overflow-x: auto; margin-left: 20px; }
+
+/* Master Duel Phase Bar */
+.phase-bar { display: flex; gap: 4px; font-size: 11px; font-weight: bold; background: #000; padding: 4px; border-radius: 20px; border: 1px solid #444; }
+.phase-step { padding: 4px 12px; border-radius: 16px; color: #666; transition: 0.3s; }
+.phase-step.active { background: #3b82f6; color: #fff; box-shadow: 0 0 8px #3b82f6; }
+
+/* Hand Area */
+.hand-area { background: rgba(0,0,0,0.6); padding: 10px; border-radius: 10px 10px 0 0; border-top: 2px solid #333; margin-top: auto; display: flex; flex-direction: column; align-items: center; }
+#hand { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 5px; justify-content: flex-start; max-width: 100%; }
+#hand .mini { transition: transform 0.2s, box-shadow 0.2s; margin-left: -10px; }
+#hand .mini:hover { transform: translateY(-15px) scale(1.1); box-shadow: 0 10px 20px rgba(0,0,0,0.8); z-index: 5; }
+
+/* Card Styling Update */
+.mini { width: 80px; box-shadow: 2px 2px 5px rgba(0,0,0,0.5); }
+.mini .t { font-size: 10px; background: rgba(0,0,0,0.8); }
+.life { width: 70px; height: 100px; font-size: 10px; }
+
+/* Responsive Desktop/Mobile */
+@media(max-width: 900px) {
+  #game-container { flex-direction: column; overflow-y: auto; }
+  #sidebar { width: 100%; height: 250px; flex-direction: row; border-right: none; border-bottom: 1px solid #333; }
+  #card-preview-img { width: auto; height: 100%; margin-bottom: 0; margin-right: 10px; }
+  .field-foe { transform: none; } /* เลิกหมุนบนมือถือ */
+  .mini { width: 65px; }
+  .zone-box { min-width: 65px; min-height: 90px; }
+}
+/* compat: setup screen scroll (body overflow hidden by overhaul) */
+#setup{overflow-y:auto;max-height:calc(100vh - 50px)}
+/* === DUEL ONE-SCREEN (viewport-fit, no page vertical scroll during duel) === */
+html,body{height:100%}
+#setup{max-height:calc(100dvh - 50px)}
+body.duel-active{height:100vh;height:100dvh;display:grid;grid-template-rows:auto minmax(0,1fr);overflow:hidden}
+body.duel-active header{flex-wrap:nowrap;gap:8px;padding:8px 10px;min-width:0;overflow-x:auto;scrollbar-width:none}
+body.duel-active header>*{flex:none;min-width:0}
+body.duel-active header h1{flex:1 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.duel-active #game-container{height:100%;min-height:0;min-width:0;width:100%;overflow:hidden}
+body.duel-active #sidebar{width:280px;min-width:0;min-height:0;overflow:hidden}
+body.duel-active #board{display:grid;grid-template-rows:minmax(0,1.25fr) auto minmax(0,1fr) auto;gap:6px;overflow:hidden;min-height:0;min-width:0;padding:8px}
+body.duel-active .field-half{min-height:0;min-width:0;overflow:hidden;gap:4px}
+body.duel-active .field-foe{transform:none}
+body.duel-active .field-row{min-height:0;min-width:0}
+body.duel-active .zone-box{min-width:0;min-height:0}
+body.duel-active .center-field{min-width:0;min-height:0;margin:0;padding:8px}
+body.duel-active .center-field>*{min-width:0}
+body.duel-active .phase-bar{flex:none}
+body.duel-active .hand-area{min-width:0;min-height:0;margin-top:0}
+body.duel-active .row{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;min-height:0;touch-action:pan-x;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
+body.duel-active .zone-box .row{justify-content:safe center}
+/* card sizes scale with viewport height */
+body.duel-active #board{--field-card-w:clamp(40px,9dvh,72px);--hand-card-w:clamp(56px,13dvh,96px)}
+body.duel-active .zone-box .mini{width:var(--field-card-w);min-width:var(--field-card-w)}
+body.duel-active #hand .mini{width:var(--hand-card-w);min-width:var(--hand-card-w)}
+body.duel-active .life{width:var(--field-card-w);height:auto;aspect-ratio:5/7;min-height:0;font-size:9px}
+@media(max-height:720px){body.duel-active .zone-box .mini .t{display:none}}
+/* opponent facedown hand strip */
+.opponent-hand-area{display:flex;align-items:center;gap:8px;min-height:0;min-width:0;justify-content:center}
+.opponent-hand-label{font-size:11px;color:#888;white-space:nowrap;flex:none}
+.opponent-hand-cards{display:flex;align-items:center;min-height:0;min-width:0}
+.card-back{width:clamp(22px,4.5dvh,34px);aspect-ratio:249/339;border-radius:4px;border:1px solid #6b7280;background:linear-gradient(135deg,#1e293b 0%,#0f172a 50%,#1e3a8a 100%);position:relative;margin-left:-10px;pointer-events:none;flex:none}
+.card-back:first-child{margin-left:0}
+.card-back::after{content:'';position:absolute;inset:3px;border:1px solid rgba(255,255,255,.25);border-radius:3px;background:repeating-linear-gradient(45deg,rgba(255,255,255,.08) 0 3px,transparent 3px 6px)}
+.foe-more{font-size:11px;color:#fbbf24;margin-left:6px;flex:none}
+/* inspector toggle (tablet/phone only, during duel) */
+#card-inspector-toggle{display:none}
+.mini:focus-visible{outline:2px solid #3b82f6;outline-offset:1px}
+#modal .box{max-height:92vh;max-height:92dvh}
+@media(pointer:coarse){body.duel-active button{min-height:44px}}
+@media(min-width:1024px){body.duel-active #sidebar{display:flex}}
+@media(min-width:768px) and (max-width:1023px){body.duel-active #board{--field-card-w:clamp(52px,10dvh,64px)}}
+@media(max-width:1023px){
+  body.duel-active #sidebar{display:none}
+  body.duel-active #card-inspector-toggle{display:inline-block;min-width:44px;min-height:44px}
+  body.duel-active .phase-bar{font-size:10px}
+  body.duel-active .phase-step{padding:4px 8px}
+}
+@media(max-width:767px){
+  body.duel-active{padding-bottom:env(safe-area-inset-bottom)}
+  body.duel-active header{gap:6px;padding:6px 8px;padding-top:calc(6px + env(safe-area-inset-top))}
+  body.duel-active header h1{font-size:12px}
+  body.duel-active #deckInfo{display:none}
+  body.duel-active #board{padding:6px;gap:4px}
+  body.duel-active #board{--field-card-w:clamp(38px,8dvh,56px);--hand-card-w:clamp(52px,11dvh,72px)}
+  body.duel-active .zone-box .mini .t{display:none}
+  body.duel-active .center-field{padding:6px}
+  body.duel-active .hand-area{padding:8px 6px calc(8px + env(safe-area-inset-bottom));border-radius:8px 8px 0 0}
+  body.duel-active .opponent-hand-label{font-size:10px}
+}
+@media(max-height:500px){
+  body.duel-active #board{--field-card-w:clamp(32px,11dvh,48px);--hand-card-w:clamp(38px,13dvh,56px);gap:2px;padding:4px}
+  body.duel-active .zone-box .mini .t{display:none}
+  body.duel-active .center-field{padding:4px 6px}
+  body.duel-active .hand-area{padding:4px 6px}
+}
+</style>
+</head>
+<body>
+<header>
+<h1>BATTLE OF TALINGCHAN — DUEL กติกาจริง v1</h1>
+<span id="phase">-</span>
+<button id="btnPhase" class="primary">ไป Phase ถัดไป</button>
+<button id="btnNew">เริ่มใหม่</button>
+<span id="deckInfo" style="font-size:12px;color:#aaa"></span>
+<a href="index.html" style="font-size:12px;color:#fff">หน้าแรก</a>
+<button id="btnMute" title="เปิด/ปิดเสียง">🔊</button>
+<button id="card-inspector-toggle" title="ดูรายละเอียดการ์ด/ล็อก">🔍</button>
+</header>
+
+<div id="setup">
+<div class="card">
+<h3>1) โหมด</h3>
+<label><input type="radio" name="mode" value="ai" checked> คน (P1) vs บอท (P2)</label><br>
+<label><input type="radio" name="mode" value="hot"> 2 คน (hotseat ผลัดกันกด)</label><br>
+<label><input type="radio" name="mode" value="online"> 🌐 Online (WebSocket)</label>
+<br><label><input type="checkbox" id="chkConfirm" checked> ยืนยันก่อนทำ action</label>
+<div id="onlineSetup" style="display:none;margin-top:8px">
+  <input type="text" id="roomCode" placeholder="รหัสห้อง (ว่าง=สร้างใหม่)" style="width:100%;padding:8px;border-radius:6px;background:#222;color:#eee;border:1px solid #444">
+  <input type="text" id="wsUrl" value="ws://localhost:3000" placeholder="WebSocket URL" style="width:100%;padding:8px;border-radius:6px;background:#222;color:#eee;border:1px solid #444;margin-top:4px">
+  <p id="onlineMsg" style="color:#fbbf24;font-size:12px"></p>
+</div>
+</div>
+<div class="card">
+<h3>2) เด็ค P1 (ของเรา)</h3>
+<select id="selDeck" style="width:100%;padding:8px;border-radius:6px;background:#222;color:#eee"></select>
+<label><input type="radio" name="dk" value="saved" checked> ใช้เด็คที่เซฟ</label><br>
+<label><input type="radio" name="dk" value="random"> สุ่มเด็คถูกกติกา (50+Only#1 / LIFE 5)</label>
+<p class="hint">จัดเด็คเองได้ที่หน้า "จัดเด็ค" — ใช้การ์ดได้ทุกใบ</p>
+</div>
+<div class="card"><button id="btnStart" class="primary" style="width:100%">เริ่ม duel</button>
+<p id="loadMsg">โหลดดาต้าการ์ด...</p></div>
+<div class="card"><h3>กติกาที่ใช้ใน v1 (ตาม rulebook 3.2)</h3>
+<p style="font-size:13px">Draw→Main→Battle→End (เทิร์น 1 คนแรกข้าม Battle) / จ่าย GEM ทีละใบ+ห้ามเกิน+GEM สีตรงสี / Avatar Zone รวม Token 6 + Avatar 4 / Construct 3 ชื่อไม่ซ้ำ / Land กลาง 1 ใบ / Magic แต่ละประเภท 1 ครั้งต่อเทิร์น / โจมตี: snapshot → โล่มนุษย์สวนได้ → วัด POWER (เสมอตายคู่, 0vs0 ไม่ตาย, ลูกฮึด) / ตี Construct ต้อง POWER มากกว่า / ตี LIFE ได้เมื่อไม่มี Avatar หรือมีเตะไข่ (1 ครั้งหงาย 1 ใบ, Power 0 ไม่หงาย) / สาหัสแล้วโดนซ้ำ = แพ้ / Deck 0 = แพ้ทันที / สามัคคี+แทงหลังรวมพลังได้<br><br>เอฟเฟค text แบบ <b>จั่ว / +POWER / ทำลาย Avatar</b> ออกอัตโนมัติ ที่เหลือขึ้นแถบเหลืองให้บังคับเองตามการ์ด (tabletop-style) — เล่นได้ทุกใบ</p></div>
+</div>
+
+<div id="game-container" style="display:none">
+  <!-- Sidebar Preview (Master Duel Left Panel) -->
+  <div id="sidebar">
+    <img id="card-preview-img" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=" alt="Card">
+    <div id="card-preview-text">
+      <h3 id="preview-name">Battle of Talingchan</h3>
+      <p id="preview-desc" style="white-space:pre-wrap; color:#aaa;">เอาเมาส์ชี้ที่การ์ดเพื่อดูรายละเอียด</p>
+      <div id="log" style="height:100px; margin-top:10px; border-top:1px solid #333; padding-top:10px; font-size:11px; background:transparent;"></div>
+    </div>
+  </div>
+
+  <!-- Playmat (Right Panel) -->
+  <div id="board" style="display:none;">
+
+    <!-- Foe Field -->
+    <div class="field-half field-foe">
+      <div style="text-align:center; font-size:12px; color:#888;">คู่ต่อสู้: <span id="foeInfo"></span></div>
+      <div id="foeHandArea" class="opponent-hand-area" aria-label="มือคู่ต่อสู้">
+        <span class="opponent-hand-label">มือคู่ต่อสู้ <b id="foeHandN">0</b></span>
+        <div id="foeHand" class="opponent-hand-cards" aria-live="polite"></div>
+      </div>
+      <!-- แถวหลัง: Life & Construct -->
+      <div class="field-row">
+        <div class="zone-box" style="flex:0.5;"><div class="row" id="foeLife"></div></div>
+        <div class="zone-box" style="flex:2;"><div class="row" id="foeCons"></div></div>
+      </div>
+      <!-- แถวหน้า: Avatar -->
+      <div class="field-row">
+        <div class="zone-box" style="flex:1;"><div class="row" id="foeAvatar"></div></div>
+      </div>
+    </div>
+
+    <!-- Center Field (Land & Phases) -->
+    <div class="center-field">
+      <div class="zone-box" style="width:100px; border-color:#d97706;">
+        <div style="position:absolute; font-size:10px; color:#d97706; margin-top:-90px;">LAND: <span id="landInfo">ว่าง</span></div>
+      </div>
+
+      <div id="pend"></div>
+
+      <!-- Phase Bar -->
+      <div class="phase-bar" style="margin-left:auto;">
+        <div class="phase-step" id="ph-draw">DRAW</div>
+        <div class="phase-step" id="ph-main">MAIN</div>
+        <div class="phase-step" id="ph-battle">BATTLE</div>
+        <div class="phase-step" id="ph-end">END</div>
+      </div>
+    </div>
+
+    <!-- Me Field -->
+    <div class="field-half">
+      <!-- แถวหน้า: Avatar -->
+      <div class="field-row">
+        <div class="zone-box" style="flex:1;"><div class="row" id="meAvatar"></div></div>
+      </div>
+      <!-- แถวหลัง: Life & Construct -->
+      <div class="field-row">
+        <div class="zone-box" style="flex:0.5;"><div class="row" id="meLife"></div></div>
+        <div class="zone-box" style="flex:2;"><div class="row" id="meCons"></div></div>
+      </div>
+      <div style="text-align:center; font-size:12px; color:#888; margin-top:4px;">เรา: <span id="meInfo"></span></div>
+    </div>
+
+    <!-- Hand Area -->
+    <div class="hand-area">
+      <div style="width:100%; display:flex; justify-content:space-between; margin-bottom:5px;">
+        <span style="font-size:12px; font-weight:bold;">มือ (<span id="handN"></span>)</span>
+        <span class="hint" id="actHint">เลือกการ์ดบนมือเพื่อเล่น</span>
+      </div>
+      <div class="row" id="hand"></div>
+    </div>
+
+  </div> <!-- end board -->
+</div> <!-- end game-container -->
+
+<div id="modal"><div class="box" id="mbox"></div></div>
+<div id="turnOverlay" style="position:fixed;inset:0;background:#0b0b0f;display:none;align-items:center;justify-content:center;z-index:50;flex-direction:column;gap:20px">
+  <h2 id="turnMsg" style="font-size:24px;text-align:center">ส่งเครื่องให้ผู้เล่น X</h2>
+  <button id="turnReady" class="primary" style="font-size:18px;padding:16px 32px">พร้อมแล้ว</button>
+</div>
+
+<script src="storage.js"></script>
+<script src="starter-decks.js"></script>
+<script src="engine.js"></script>
+<script src="ai.js"></script>
+<script src="effects.js"></script>
+<script src="card-scripts.js"></script>
+<script src="card-scripts-auto.js"></script>
+<script src="sounds.js"></script>
+<script>
+const E = window.BoTEngine, BOT = window.BoTBot, S = window.BoTStore, FX = window.BoTEffects;
+FX.install(E);
+const SFX = window.BoTSFX || {};
+document.getElementById('btnMute').onclick = () => {
+  const m = SFX.toggleMute ? SFX.toggleMute() : false;
+  document.getElementById('btnMute').textContent = m ? '🔇' : '🔊';
+};
+document.getElementById('card-inspector-toggle').onclick = () => { openInspector(); };
+let confirmActions = true;
+document.querySelectorAll('input[name=mode]').forEach(function(r) {
+  r.onchange = function() {
+    document.getElementById('onlineSetup').style.display =
+      document.querySelector('input[name=mode]:checked').value === 'online' ? 'block' : 'none';
+  };
+});
+let ws = null, mySide = null;
+function connectOnline(deckData, roomCode) {
+  var url = document.getElementById('wsUrl').value || 'ws://localhost:3000';
+  var msg = document.getElementById('onlineMsg');
+  msg.textContent = 'กำลังเชื่อมต่อ...';
+  ws = new WebSocket(url);
+  ws.onopen = function() {
+    if (roomCode) {
+      ws.send(JSON.stringify({ type: 'join', code: roomCode, deck: deckData }));
+      msg.textContent = 'กำลังเข้าห้อง ' + roomCode + '...';
+    } else {
+      ws.send(JSON.stringify({ type: 'create', deck: deckData }));
+    }
+  };
+  ws.onmessage = function(e) {
+    var data = JSON.parse(e.data);
+    if (data.type === 'created') {
+      msg.textContent = 'รหัสห้อง: ' + data.code + ' — รอผู้เล่นอีกคน...';
+      document.getElementById('roomCode').value = data.code;
+      mySide = 0;
+    }
+    if (data.type === 'ready') {
+      mySide = data.side;
+      msg.textContent = 'คุณเป็น P' + (mySide + 1) + ' — เริ่มเกม!';
+      document.getElementById('btnStart').click();
+      viewSide = mySide;
+      render();
+    }
+    if (data.type === 'action') { replayAction(data.action, data.from); }
+    if (data.type === 'disconnected') { alert('อีกฝ่ายตัดการเชื่อมต่อ'); }
+    if (data.type === 'error') { msg.textContent = data.error; }
+  };
+  ws.onerror = function() { msg.textContent = 'เชื่อมต่อไม่ได้'; };
+  ws.onclose = function() { msg.textContent = 'ตัดการเชื่อมต่อ'; ws = null; };
+}
+function sendAction(action) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'action', action: action }));
+}
+function replayAction(action, from) {
+  if (!st) return;
+  try {
+    if (action.act === 'summon') E.summonAvatar(st, from, action.uid, action.payUids);
+    else if (action.act === 'build') E.buildConstruct(st, from, action.uid, action.payUids);
+    else if (action.act === 'magic') E.playMagic(st, from, action.uid, action.opts || {});
+    else if (action.act === 'attack') {
+      var dec = E.declareAttack(st, from, action.atkUid, action.supUids, action.target);
+      if (dec.ok && !dec.negated && !dec.pending) {
+        var atk = st.players[from].avatar.find(function(a){return a.uid===action.atkUid;});
+        E.resolveBattle(st, from, atk, action.target, dec.power);
+      }
+    }
+    else if (action.act === 'reactUse') {
+      // online continuation: apply each selection and continuation once
+      FX.resolveQueued(st, action.key, true, action.picks || {});
+      // resume parent if done (resolveQueued already resumes; ensure single application)
+      if (st._frames && st._frames.length) { try { FX.resumeIfDone(st, action.evId); } catch(e){} }
+    }
+    else if (action.act === 'reactPass') {
+      FX.resolveQueued(st, action.key, false, {});
+    }
+    else if (action.act === 'ability') {
+      FX.execActivated(st, from, action.uid, action.abId, action.picks || {});
+    }
+    else if (action.act === 'nextPhase') E.nextPhase(st);
+    else if (action.act === 'skipBattle') E.skipBattle(st);
+  } catch(e) { console.error('replay error', e); }
+  render();
+}
+function showTurnOverlay() {
+  var ov = document.getElementById('turnOverlay');
+  ov.style.display = 'flex';
+  document.getElementById('turnMsg').textContent = 'ส่งเครื่องให้ผู้เล่น ' + (viewSide + 1);
+  document.getElementById('turnReady').onclick = function() {
+    ov.style.display = 'none';
+    render();
+  };
+}
+const CDN_DB='https://cdn.bottcg.com/data/cards.3c0b9b1b.json';
+const IMG='https://cdn.bottcg.com/cards';
+let DB=[];
+let st=null, mode='ai', viewSide=0; // hotseat: viewSide = st.cur
+let selPay=new Set(), atkUid=null, supSet=new Set(), payFor=null;
+
+function imgUrl(c){ let b=IMG; const s=(c.print||'').split('-')[0]; if(s==='SD09') b+='/123v1k1';
+  const f=['SCR','PR','CBR'].includes(c.rare)?'-'+c.rare:''; return `${b}/${c.print}${f}.png`; }
+function log(){ const l=document.getElementById('log'); l.textContent=st.log.join('\n'); l.scrollTop=l.scrollHeight; }
+async function loadDB(){
+  await S.loadDB(); DB = S.DB;
+  try { FX.setCardDB(DB); } catch(e) {}
+  document.getElementById('loadMsg').textContent='ดาต้าพร้อม: '+DB.length+' rows';
+  S.seedStarters();
+  refreshDeckSelect();
+}
+function refreshDeckSelect(){
+  const sel = document.getElementById('selDeck'); sel.innerHTML='';
+  const list = S.listDecks();
+  if(!list.length){ const o=document.createElement('option'); o.value=''; o.textContent='(ยังไม่มีเด็คที่เซฟ — จะสุ่มให้)'; sel.appendChild(o); }
+  list.forEach(d=>{ const o=document.createElement('option'); o.value=d.id; const r=S.resolveDeck(d); o.textContent=`${d.name} (Main ${r.main.length}/50 · LIFE ${r.life.length}/5)`; sel.appendChild(o); });
+  const act = S.getActive();
+  if(act && list.some(d=>d.id===act)) sel.value = act;
+}
+// dedupe by print (gameplay identical across foils)
+function byPrint(){ return S.byPrint(); }
+function randDeck(){ return S.randomDeck(); }
+function themeDeck(){
+  const sets=['SD01','SD02','SD03','SD04','SD05','SD06','SD07','SD08','SD09'];
+  const s=sets[Math.floor(Math.random()*sets.length)];
+  let pool=byPrint().filter(c=>(c.print||'').startsWith(s)&&['Avatar','Magic','Construct'].includes(c.type));
+  if(!pool.length) return randDeck();
+  const onlyAll=byPrint().filter(c=>c.ex&&/only/i.test(c.ex)&&['Avatar','Magic','Construct'].includes(c.type));
+  const first=onlyAll[Math.floor(Math.random()*onlyAll.length)];
+  const main=[first]; const cnt={[first.name]:1};
+  const fill=pool.concat(byPrint().filter(c=>['Avatar','Magic','Construct'].includes(c.type)));
+  while(main.length<50){ const c=fill[Math.floor(Math.random()*fill.length)];
+    if(c.ex&&/only/i.test(c.ex)) continue; const lim=c.customLimit||4;
+    if((cnt[c.name]||0)>=lim) continue; cnt[c.name]=(cnt[c.name]||0)+1; main.push(c); }
+  const ls=byPrint().filter(c=>c.type==='Life'); const seen=new Set(), life=[];
+  while(life.length<5){ const c=ls[Math.floor(Math.random()*ls.length)]; if(seen.has(c.name))continue; seen.add(c.name); life.push(c); }
+  return {main,life};
+}
+document.getElementById('btnStart').onclick=()=>{
+  mode=document.querySelector('input[name=mode]:checked').value;
+  confirmActions = document.getElementById('chkConfirm').checked;
+  const dk=document.querySelector('input[name=dk]:checked').value;
+  let d1;
+  if(dk==='saved'){
+    const saved = S.getDeck(document.getElementById('selDeck').value);
+    if(saved){ const r = S.resolveDeck(saved); d1 = r; }
+  }
+  if(!d1 || !d1.main.length) d1 = randDeck();
+  const d2 = randDeck(); // บอทสุ่มเด็คถูกกติกาเสมอ
+  const e1=E.validateDecks(d1.main,d1.life), e2=E.validateDecks(d2.main,d2.life);
+  if(e1.length && !confirm('เด็ค P1 ไม่ถูกกติกา:\n'+e1.join('\n')+'\nเริ่มอยู่ดี?')) return;
+  st=E.newGame(d1.main,d1.life,d2.main,d2.life);
+  E.doDrawPhase(st);
+  document.getElementById('setup').style.display='none';
+  document.body.classList.add('duel-active');
+  document.getElementById('game-container').style.display='flex';
+  document.getElementById('board').style.display='grid';
+  document.getElementById('deckInfo').textContent='P1 50+5 vs P2 50+5 | err: '+(e1.concat(e2).join('; ')||'none');
+  viewSide=0; render();
+  FX.setHumanSides(mode==='ai' ? [0] : [0, 1]);
+  if(mode==='ai'&&st.cur===1) setTimeout(botTurn,600);
+};
+document.getElementById('btnNew').onclick=()=>location.reload();
+document.getElementById('btnPhase').onclick=()=>{
+  if(!st||st.winner) return;
+  if(st.phase==='main'&&st.turn===1&&st.cur===0) E.skipBattle(st);
+  else E.nextPhase(st);
+  if(SFX.phase) SFX.phase();
+  if(mode==='online') sendAction({ act: 'nextPhase' });
+  if(st.phase==='draw'&&false){} // draw handled inside nextPhase on turn pass
+  if(mode==='ai'&&st.cur===1&&!st.winner) setTimeout(botTurn,600);
+  if(mode==='hot') {
+    viewSide=st.cur;
+    showTurnOverlay();
+    return;
+  }
+  render();
+};
+function botTurn(){
+  if(!st||st.winner||st.cur!==1) return;
+  // AI turns stop for human decisions (pending responses/frames)
+  if((st.pendingResponses&&st.pendingResponses.length)||(st._frames&&st._frames.length)){ render(); return; }
+  // bot plays main (pass FX for authoritative Magic payments)
+  if(st.phase==='draw'){ E.enterMain(st); st.phase='main'; }
+  if(st.phase==='main'){ try{ BOT.botMain(E,st,1,FX); }catch(e){ try{ BOT.botMain(E,st,1); }catch(e2){} } try{ BOT.botAbilities(E,FX,st,1); }catch(e){} if((st.pendingResponses&&st.pendingResponses.length)){ render(); return; } st.phase='battle'; render(); }
+  if(st.phase==='battle'){ if(!(st.turn===1&&st.cur===0)){ try{ BOT.botBattle(E,st,1); }catch(e){} } if((st.pendingResponses&&st.pendingResponses.length)){ render(); return; } st.phase='end'; render(); }
+  if(st.phase==='end'){ BOT.botDiscard(E,st,1); E.nextPhase(st); }
+  render();
+  if(st.cur===1&&!st.winner){ setTimeout(botTurn,600); }
+}
+// ---------- rendering ----------
+let lastPreviewDb = null;
+function updateInspector(db) {
+  lastPreviewDb = db;
+  var prevImg = document.getElementById('card-preview-img');
+  var prevName = document.getElementById('preview-name');
+  var prevDesc = document.getElementById('preview-desc');
+  if(!prevImg || !prevName || !prevDesc) return;
+  prevImg.src = imgUrl(db);
+
+  let info = `<p><b>${db.print}</b> [${db.rare}] | ${db.type} ${db.subtype?'/ '+db.subtype:''}</p>`;
+  info += `<p>Cost: ${db.cost!==undefined?db.cost:'-'} | GEM: ${db.gem||0} ${db.gemColor?`(${db.gemColor})`:''} | Power: ${db.power!==undefined?db.power:'-'}</p>`;
+  if (db.mainEffect) info += `<p style="color:#4ade80">${db.mainEffect}</p>`;
+  if (db.hashtagText) info += `<p style="color:#fbbf24"># ${db.hashtagText}</p>`;
+
+  prevName.textContent = db.name;
+  prevDesc.innerHTML = info;
+}
+function openInspector() {
+  var h = '';
+  if (lastPreviewDb) {
+    var db = lastPreviewDb;
+    h += '<h3 style="margin-top:0">' + String(db.name).replace(/</g,'&lt;') + '</h3>';
+    h += '<p><b>' + db.print + '</b> [' + db.rare + '] | ' + db.type + (db.subtype?' / '+db.subtype:'') + ' | สี:' + (db.color||'-') + '</p>';
+    h += '<p>Cost:' + (db.cost===undefined?'-':db.cost) + ' GEM:' + (db.gem||0) + (db.gemColor?'('+db.gemColor+')':'') + ' Power:' + (db.power===undefined?'-':db.power) + '</p>';
+    if (db.mainEffect) h += '<p style="white-space:pre-wrap;font-size:13px">' + String(db.mainEffect).replace(/</g,'&lt;') + '</p>';
+    if (db.hashtagText) h += '<p style="color:#fbbf24"># ' + String(db.hashtagText).replace(/</g,'&lt;') + '</p>';
+  } else {
+    h += '<h3 style="margin-top:0">แตะการ์ดเพื่อดูรายละเอียด</h3><p class="hint">แตะการ์ดใบไหน รายละเอียดจะมาขึ้นที่นี่</p>';
+  }
+  if (st && st.log && st.log.length) {
+    h += '<h4>Log ล่าสุด</h4><div style="background:#000;color:#7CFC00;border-radius:8px;padding:8px;font-size:11px;max-height:30vh;max-height:30dvh;overflow:auto;white-space:pre-wrap">' + st.log.slice(-30).join('\n').replace(/</g,'&lt;') + '</div>';
+  }
+  h += '<button id="mX" style="width:100%;margin-top:8px;min-height:44px">ปิด</button>';
+  mbox(h);
+  document.getElementById('mX').onclick = mclose;
+}
+function renderOpponentHand(count) {
+  var n = Math.max(0, count|0);
+  document.getElementById('foeHandN').textContent = n;
+  var box = document.getElementById('foeHand');
+  box.innerHTML = '';
+  var show = Math.min(n, 12);
+  for (var i = 0; i < show; i++) {
+    var b = document.createElement('div');
+    b.className = 'card-back';
+    b.setAttribute('aria-hidden', 'true');
+    box.appendChild(b);
+  }
+  if (n > 12) {
+    var more = document.createElement('span');
+    more.className = 'foe-more';
+    more.textContent = '+' + (n - 12);
+    box.appendChild(more);
+  }
+}
+function cardMini(c,extra){
+  const d=document.createElement('div'); d.className='mini anim-in'+(extra||'');
+  d.innerHTML=`<img loading="lazy" src="${imgUrl(c.db||c)}" onerror="this.style.display='none'"><div class="t">${(c.db||c).name}<br><small>${(c.db||c).print} ${(c.db||c).type}${c.tapped?' | นอน':''}</small><br><b>POW ${E.effPower(c,0,st)}</b></div>`;
+  // อัปเดต Sidebar/inspector เมื่อเอาเมาส์ชี้หรือ focus (tap บนมือถือ) — ไม่ trigger action ใดๆ
+  d.onmouseover = function() { updateInspector(c.db || c); };
+  d.tabIndex = 0;
+  d.onfocus = function() { updateInspector(c.db || c); };
+  return d;
+}
+function render(){
+  if(!st) return;
+  if(st.winner !== null && st.winner !== undefined && !st._sfxPlayed) {
+    st._sfxPlayed = true;
+    if(st.winner === viewSide && SFX.win) SFX.win();
+    else if(SFX.lose) SFX.lose();
+  }
+  document.getElementById('phase').textContent=`Turn ${st.turn} | ${st.cur===0?'P1':'P2'} | ${st.phase}`+(st.winner?` | จบ! ${st.winner===0?'P1':'P2'} ชนะ (${st.winReason})`:'');
+  // Update Phase Bar UI
+  document.querySelectorAll('.phase-step').forEach(el => el.classList.remove('active'));
+  if(st.phase === 'draw') document.getElementById('ph-draw').classList.add('active');
+  if(st.phase === 'main') document.getElementById('ph-main').classList.add('active');
+  if(st.phase === 'battle') document.getElementById('ph-battle').classList.add('active');
+  if(st.phase === 'end') document.getElementById('ph-end').classList.add('active');
+  document.getElementById('btnPhase').disabled=!!st.winner;
+  const showMe = mode==='ai'?st.players[0]:st.players[viewSide];
+  const showFoe = mode==='ai'?st.players[1]:st.players[1-viewSide];
+  const myTurn = st.cur===showMe.idx;
+  renderOpponentHand(showFoe.hand.length);
+  document.getElementById('meInfo').textContent=`P${showMe.idx+1} มือ${showMe.hand.length} deck${showMe.main.length} นรก${showMe.hell.length}${showMe.sahat?' สาหัส!':''}${myTurn?' (เทิร์นเรา)':''}`;
+  document.getElementById('foeInfo').textContent=`P${showFoe.idx+1} มือ${showFoe.hand.length} deck${showFoe.main.length} นรก${showFoe.hell.length}${showFoe.sahat?' สาหัส!':''}`;
+  // avatars
+  const fa=document.getElementById('foeAvatar'); fa.innerHTML='';
+  showFoe.avatar.forEach(a=>{ const m=cardMini(a,(a.tapped?' tapped':'')); m.onclick=()=>onTargetFoeAvatar(a); fa.appendChild(m); });
+  const ma=document.getElementById('meAvatar'); ma.innerHTML='';
+  showMe.avatar.forEach(a=>{ const m=cardMini(a,(a.tapped?' tapped':'')+(a.uid===atkUid?' sel':'' )+(supSet.has(a.uid)?' sel':''));
+    m.onclick=()=>onMeAvatar(a,showMe,myTurn); ma.appendChild(m); });
+  const fc=document.getElementById('foeCons'); fc.innerHTML='';
+  showFoe.construct.forEach(c=>{ const m=cardMini(c,''); m.onclick=()=>onTargetFoeCons(c); fc.appendChild(m); });
+  const mc=document.getElementById('meCons'); mc.innerHTML='';
+  showMe.construct.forEach(c=>{ mc.appendChild(cardMini(c,'')); });
+  const fl=document.getElementById('foeLife'); fl.innerHTML='';
+  showFoe.life.forEach(l=>{ const d=document.createElement('div'); d.className='life'+(l.open?' open':''); d.textContent=l.open?l.card.db.name:'คว่ำ'; d.onclick=()=>onTargetLife(showFoe); fl.appendChild(d); });
+  const ml=document.getElementById('meLife'); ml.innerHTML='';
+  showMe.life.forEach(l=>{ const d=document.createElement('div'); d.className='life'+(l.open?' open':''); d.textContent=l.open?l.card.db.name:'คว่ำ'; ml.appendChild(d); });
+  document.getElementById('landInfo').textContent=st.land?st.land.card.db.name+' (ของ P'+(st.land.owner+1)+')':'ว่าง';
+  // pendings
+  const pe=document.getElementById('pend'); pe.innerHTML='';
+  st.pendingOps.forEach((p,i)=>{ const d=document.createElement('div'); d.className='pending';
+    d.innerHTML=p.text+` <button data-i="${i}">ทำแล้ว</button>`; pe.appendChild(d); });
+  pe.querySelectorAll('button').forEach(b=>b.onclick=()=>{ st.pendingOps.splice(+b.dataset.i,1); render(); });
+  // hand (hidden info: hotseat shows current side only)
+  const h=document.getElementById('hand'); h.innerHTML='';
+  document.getElementById('handN').textContent=showMe.hand.length;
+  showMe.hand.forEach(c=>{ const m=cardMini(c,''); m.onclick=()=>onHand(c,showMe,myTurn); h.appendChild(m); });
+  document.getElementById('actHint').textContent = !myTurn ? 'รอเทิร์นอีกฝ่าย' :
+    st.phase==='main' ? 'Main: กด Avatar เพื่ออัญเชิญ / Magic เพื่อใช้ / Construct เพื่อก่อสร้าง' :
+    st.phase==='battle' ? (atkUid?'เลือกเป้าหมายฝั่งตรงข้าม (แตะ Avatar/Construct/LIFE)':'Battle: แตะ Avatar เราที่ตื่นเพื่อโจมตี') :
+    'กด "ไป Phase ถัดไป"';
+  log();
+  drainQueues();
+}
+// ---------- interactions ----------
+function onHand(c,p,myTurn){
+  if(!myTurn||st.winner) return;
+  const t=c.db.type;
+  if(st.phase!=='main'&&!(t==='Magic'&&c.db.subtype==='React')&&!c.db.mainEffect.includes('สั่งใช้')){ alert('Main เท่านั้น (ยกเว้น React/สั่งใช้นอก Main ที่ระบุ)'); return; }
+  if(t==='Avatar'){
+    const abs = FX.listActivated(st,p.idx,c).filter(a=>a.location==='hand'||!a.location);
+    const handAbs = abs.filter(a=>a.location==='hand');
+    if(handAbs.length && st.phase!=='main'){ openCardModal(c,p); return; }
+    if(handAbs.length){
+      let h = `<h3>${c.db.name}</h3><button class="primary" style="width:100%;margin:4px 0" id="hAct">สั่งใช้ (${handAbs.length})</button><button style="width:100%;margin:4px 0" id="hSum">อัญเชิญปกติ</button><button id="mX" style="width:100%">ปิด</button>`;
+      mbox(h);
+      document.getElementById('mX').onclick = mclose;
+      document.getElementById('hSum').onclick = ()=>{ mclose(); openPay(c,p,'summon'); };
+      document.getElementById('hAct').onclick = ()=>{ mclose(); openCardModal(c,p); };
+      return;
+    }
+    openPay(c,p,'summon'); return;
+  }
+  else if(t==='Construct') openPay(c,p,'build');
+  else if(t==='Magic'){
+    // Unified payment flow: GEM + additional costs + target preserved through one modal (cancellation changes nothing)
+    openMagicPay(c,p);
+  }
+}
+function openMagicPay(c,p){
+  const sub=c.db.subtype||'Normal';
+  const need=c.db.cost||0, color=c.db.color||'';
+  // state preserved through payment: target + ability picks + GEM
+  payFor={c,p,kind:'magic',sub,targetUid:null,discardUids:[]}; selPay=new Set();
+  drawMagicPay();
+}
+function drawMagicPay(){
+  const m=document.getElementById('modal'); m.style.display='flex';
+  const {c,p,sub}=payFor;
+  const need=c.db.cost||0, color=c.db.color||'';
+  const gems=p.hand.filter(x=>x.uid!==c.uid&&(x.db.gem||0)>0);
+  let sum=[...selPay].reduce((s,u)=>{ const x=p.hand.find(h=>h.uid===u); return s+(x?x.db.gem:0); },0);
+  const chk=E.checkPay(st,p,need,color,[...selPay].map(u=>p.hand.find(h=>h.uid===u)).filter(Boolean),c.db.name,c.uid);
+  const needsTarget = sub==='Modification';
+  const needsDiscard = /ทิ้ง\s*Avatar/.test(c.db.mainEffect||'') || /ทิ้งการ์ดบนมือ/.test(c.db.mainEffect||'');
+  let discardList=[];
+  if(needsDiscard){
+    const isTep = /เทพ/.test(c.db.mainEffect||'');
+    discardList=p.hand.filter(x=>x.uid!==c.uid && ![...selPay].includes(x.uid) && (!isTep || (x.db.type==='Avatar' && x.db.symbol==='เทพ')));
+  }
+  const selDis = payFor.discardUids||[];
+  document.getElementById('mbox').innerHTML=`<h3>ใช้ ${sub} ${c.db.name} (Cost ${need}${color?' สี'+color:''})</h3>
+  <p>GEM ที่เลือก: ${sum}/${need} — ${chk.ok?'<b style="color:#4ade80">จ่ายได้</b>':'<span style="color:#f87171">'+(chk.error||'')+'</span>'}</p>
+  ${gems.map(g=>`<div class="pay"><span>${g.db.name} (GEM ${g.db.gem}${g.db.gemColor?' '+g.db.gemColor:''})</span><button data-u="${g.uid}">${selPay.has(g.uid)?'เอาออก':'ทิ้งจ่าย'}</button></div>`).join('')}
+  ${needsTarget?`<h4>เลือก Avatar สวมใส่</h4>`+radioList('pk-tg',p.avatar):''}
+  ${needsDiscard?`<h4>ทิ้งจ่ายเพิ่ม (เลือก ${/(\d+)\s*ใบ/.test(c.db.mainEffect||'')?(/(\d+)\s*ใบ/.exec(c.db.mainEffect||'')[1]):'1'} ใบ)</h4>`+discardList.map(x=>`<label style="display:block;padding:4px;border-bottom:1px dotted #333"><input type="checkbox" class="pk-dis" value="${x.uid}" ${(selDis||[]).includes(x.uid)?'checked':''}> ${x.db.name} <small>${x.db.type} ${x.db.symbol||''}</small></label>`).join(''):''}
+  <div style="display:flex;gap:8px;margin-top:10px"><button class="primary" id="pOk" ${chk.ok?'':'disabled'}>ยืนยัน</button><button id="pAuto">เลือกให้</button><button id="pX">ยกเลิก</button></div>
+  <p class="hint">ยกเลิก = ไม่เปลี่ยนแปลงอะไร (การ์ด/ค่าใช้จ่าย/สิทธิ์ยังอยู่ครบ)</p>`;
+  document.getElementById('pX').onclick=()=>{ m.style.display='none'; };
+  document.getElementById('pAuto').onclick=()=>{
+    const sorted=gems.slice().sort((a,b)=>b.db.gem-a.db.gem); selPay=new Set(); let s=0;
+    for(const g of sorted){ if(s>=need)break; selPay.add(g.uid); s+=g.db.gem; }
+    drawMagicPay();
+  };
+  document.getElementById('mbox').querySelectorAll('[data-u]').forEach(b=>b.onclick=()=>{
+    const u=+b.dataset.u; selPay.has(u)?selPay.delete(u):selPay.add(u); drawMagicPay();
+  });
+  const disBoxes=document.querySelectorAll('.pk-dis');
+  if(disBoxes.length) disBoxes.forEach(b=>b.onchange=()=>{
+    payFor.discardUids=Array.from(document.querySelectorAll('.pk-dis:checked')).map(x=>+x.value);
+  });
+  document.getElementById('pOk').onclick=()=>{
+    if(needsTarget){
+      const el=document.querySelector('input[name=pk-tg]:checked');
+      if(!el){ alert('เลือกเป้าหมายก่อน'); return; }
+      payFor.targetUid=+el.value;
+    }
+    if(disBoxes.length) payFor.discardUids=Array.from(document.querySelectorAll('.pk-dis:checked')).map(x=>+x.value);
+    if (confirmActions && !confirm('ใช้ ' + c.db.name + '?')) return;
+    const opts={ payUids:[...selPay] };
+    if(payFor.targetUid) opts.targetUid=payFor.targetUid;
+    if(payFor.discardUids && payFor.discardUids.length) opts.discardUids=payFor.discardUids;
+    const r=E.playMagic(st,p.idx,c.uid,opts);
+    m.style.display='none';
+    if(!r.ok) { alert(r.error); render(); return; }
+    if(r.ok && sub==='Modification' && SFX.equip) SFX.equip();
+    else if(r.ok && SFX.magic) SFX.magic();
+    if(r.ok && mode === 'online') sendAction({ act: 'magic', uid: c.uid, opts: opts });
+    afterAction();
+  };
+}
+function openPay(c,p,kind){
+  payFor={c,p,kind}; selPay=new Set();
+  drawPay();
+}
+function drawPay(){
+  const m=document.getElementById('modal'); m.style.display='flex';
+  const {c,p,kind}=payFor;
+  const need=c.db.cost||0, color=c.db.color||'';
+  const gems=p.hand.filter(x=>x.uid!==c.uid&&(x.db.gem||0)>0);
+  let sum=[...selPay].reduce((s,u)=>{ const x=p.hand.find(h=>h.uid===u); return s+(x?x.db.gem:0); },0);
+  const chk=E.checkPay(st,p,need,color,[...selPay].map(u=>p.hand.find(h=>h.uid===u)).filter(Boolean),c.db.name,c.uid);
+  document.getElementById('mbox').innerHTML=`<h3>${kind==='summon'?'อัญเชิญ':'ก่อสร้าง'} ${c.db.name} (Cost ${need}${color?' สี'+color:''})</h3>
+  <p>GEM ที่เลือก: ${sum}/${need} — ${chk.ok?'<b style="color:#4ade80">จ่ายได้</b>':'<span style="color:#f87171">'+(chk.error||'')+'</span>'}</p>
+  ${gems.map(g=>`<div class="pay"><span>${g.db.name} (GEM ${g.db.gem}${g.db.gemColor?' '+g.db.gemColor:''})</span><button data-u="${g.uid}">${selPay.has(g.uid)?'เอาออก':'ทิ้งจ่าย'}</button></div>`).join('')}
+  <div style="display:flex;gap:8px;margin-top:10px"><button class="primary" id="pOk" ${chk.ok?'':'disabled'}>ยืนยัน</button><button id="pAuto">เลือกให้</button><button id="pX">ยกเลิก</button></div>`;
+  document.getElementById('pX').onclick=()=>m.style.display='none';
+  document.getElementById('pAuto').onclick=()=>{
+    // auto: biggest first then trim
+    const sorted=gems.slice().sort((a,b)=>b.db.gem-a.db.gem); selPay=new Set(); let s=0;
+    for(const g of sorted){ if(s>=need)break; selPay.add(g.uid); s+=g.db.gem; }
+    drawPay();
+  };
+  document.getElementById('mbox').querySelectorAll('[data-u]').forEach(b=>b.onclick=()=>{
+    const u=+b.dataset.u; selPay.has(u)?selPay.delete(u):selPay.add(u); drawPay();
+  });
+  document.getElementById('pOk').onclick=()=>{
+    if (confirmActions && !confirm((kind==='summon'?'อัญเชิญ':'ก่อสร้าง') + ' ' + c.db.name + '?')) return;
+    let r;
+    if(kind==='summon') r=E.summonAvatar(st,p.idx,c.uid,[...selPay]);
+    else r=E.buildConstruct(st,p.idx,c.uid,[...selPay]);
+    m.style.display='none';
+    if(!r.ok) alert(r.error);
+    if(r.ok && SFX.summon) SFX.summon();
+    if(r.ok && SFX.construct && kind==='build') SFX.construct();
+    if (r.ok && mode === 'online') sendAction({ act: kind, uid: c.uid, payUids: [...selPay] });
+    render();
+  };
+}
+function onMeAvatar(a,p,myTurn){
+  if(!myTurn||st.winner) return;
+  if(st.phase==='main'){ openCardModal(a,p); return; }
+  if(st.phase!=='battle'){ alert('โจมตีได้เฉพาะ Battle Phase'); return; }
+  if(st.turn===1&&st.cur===0){ alert('เทิร์น 1 คนแรกข้าม Battle'); return; }
+  if(a.tapped){ alert('นอนอยู่ โจมตีไม่ได้'); return; }
+  if(atkUid===a.uid){ atkUid=null; supSet=new Set(); render(); return; }
+  // ถ้ามี attacker แล้ว แตะตัวอื่น = เลือกสามัคคี/แทงหลัง
+  if(atkUid && a.uid!==atkUid){
+    if(!(E.hasKwEff(a,'สามัคคี')||E.hasKwEff(a,'แทงหลัง'))){ alert('ตัวนี้ไม่มีสามัคคี/แทงหลัง'); return; }
+    supSet.has(a.uid)?supSet.delete(a.uid):supSet.add(a.uid); render(); return;
+  }
+  if(confirmActions && !confirm('เลือก ' + a.db.name + ' โจมตี?')) return;
+  atkUid=a.uid; supSet=new Set(); render();
+}
+// ---------- ability UI ----------
+function mbox(html){ const m=document.getElementById('modal'); m.style.display='flex'; document.getElementById('mbox').innerHTML=html; }
+function mclose(){ document.getElementById('modal').style.display='none'; }
+function openCardModal(inst,p){
+  const abs = FX.listActivated(st,p.idx,inst);
+  const sc = (window.BoTCardScripts||{})[inst.db.print]||{};
+  let h = `<h3 style="margin-top:0">${inst.db.name}</h3><p style="white-space:pre-wrap;font-size:13px">${inst.db.mainEffect||''}</p>`;
+  if(!abs.length) h += '<p class="hint">ไม่มีสั่งใช้ที่กดได้ตอนนี้</p>';
+  abs.forEach(ab=>{ h += `<button style="width:100%;margin:4px 0" data-ab="${ab.id}">สั่งใช้${ab.name?' ('+ab.name+')':''}</button>`; });
+  if(sc.manualNotes && sc.manualNotes.length) h += '<p class="hint">ต้องบังคับเองบางส่วน: ' + sc.manualNotes.map(x=>x.replace(/</g,'&lt;')).join(' / ') + '</p>';
+  h += '<button id="mX" style="width:100%">ปิด</button>';
+  mbox(h);
+  document.getElementById('mX').onclick = mclose;
+  document.querySelectorAll('[data-ab]').forEach(b=>b.onclick=()=>flowAbility(inst,b.dataset.ab));
+}
+function flowAbility(inst,abId){
+  const p = st.players[st.cur];
+  const sc = (window.BoTCardScripts||{})[inst.db.print]||{};
+  const ab = (sc.abilities||[]).find(a=>a.id===abId);
+  if(!ab) return;
+  if(ab.choose){
+    let h = `<h3>เลือก: ${inst.db.name}</h3>`;
+    ab.choose.forEach((ch,i)=>{ h += `<button style="width:100%;margin:4px 0" data-ch="${i}">แบบที่ ${i+1}</button>`; });
+    h += '<button id="mX" style="width:100%">ยกเลิก</button>';
+    mbox(h);
+    document.getElementById('mX').onclick = mclose;
+    document.querySelectorAll('[data-ch]').forEach(b=>b.onclick=()=>openPicks(inst,ab,+b.dataset.ch,null,inst.owner));
+    return;
+  }
+  openPicks(inst,ab,null,null,inst.owner);
+}
+function radioList(name,items){
+  return items.map(c=>`<label style="display:block;padding:4px;border-bottom:1px dotted #333"><input type="radio" name="${name}" value="${c.uid}"> ${c.db?c.db.name:c.name} <small>${c.db?c.db.print+' P'+(c.db.power===undefined?'-':c.db.power):''}</small></label>`).join('') || '<p class="hint">ไม่มีตัวเลือก</p>';
+}
+function openPicks(inst,ab,choiceIdx,onConfirm,meOverride){
+  const p = st.players[meOverride!==undefined?meOverride:st.cur], me = p.idx;
+  const ops = choiceIdx!=null ? (ab.choose[choiceIdx].ops||[]) : (ab.ops||[]);
+  const doExec = onConfirm || ((picks)=>{
+    const r = FX.execActivated(st,me,inst.uid,ab.id,picks);
+    if(r.ok && mode==='online') sendAction({ act:'ability', uid:inst.uid, abId:ab.id, picks:picks });
+    mclose(); if(!r.ok) alert(r.error); afterAction();
+  });
+  let h = `<h3>${inst.db.name}${ab.name?' — '+ab.name:''}${choiceIdx!=null?' (แบบที่ '+(choiceIdx+1)+')':''}</h3>`;
+  const need = { discard:0, sacrifice:null, exile:null, equipCost:null, host:null, target:null, scry:null, send:null };
+  if(ab.cost){
+    if(ab.cost.discard) need.discard = ab.cost.discard;
+    if(ab.cost.giveHandToFoe){ need.discard = ab.cost.giveHandToFoe; need.giveFoe = true; }
+    if(ab.cost.sacrificeMyAvatar) need.sacrifice = true;
+    if(ab.cost.exileBoard) need.exile = true;
+    if(ab.cost.destroyEquipped) need.equipCost = true;
+    if(ab.cost.sendSymbolToHell||ab.cost.sendNamedToHell) need.send = true;
+  }
+  if(ab.needsHost) need.host = true;
+  const tgtOp = ops.find(o=>['destroy','bounce','exile','silence','buff','buffPer','gainControl','moveToMagic'].includes(o.op)&&o.spec);
+  if(tgtOp) need.target = tgtOp;
+  const scryOp = ops.find(o=>o.op==='scry');
+  if(scryOp) need.scry = scryOp;
+  const rbOp = ops.find(o=>o.op==='rebuildConstruct');
+  if(rbOp) need.rebuild = rbOp;
+  if(!need.discard&&!need.sacrifice&&!need.exile&&!need.equipCost&&!need.host&&!need.target&&!need.scry&&!need.rebuild&&!need.send){
+    doExec(choiceIdx!=null?{choice:choiceIdx}:{});
+    return;
+  }
+  if(need.discard){
+    const symF = ab.cost && (ab.cost.discardSymbol||ab.cost.discardAvatarSymbol);
+    const needAv = ab.cost && ab.cost.discardAvatarSymbol;
+    const list = p.hand.filter(c=>c.uid!==inst.uid && (!symF || c.db.symbol===symF) && (!needAv || c.db.type==='Avatar'));
+    h += `<h4>ทิ้งมือ ${need.discard} ใบ${symF?' (Symbol '+symF+(needAv?' Avatar':'')+')':''}</h4>` + list.map(c=>`<label style="display:block;padding:4px;border-bottom:1px dotted #333"><input type="checkbox" class="pk-dis" value="${c.uid}"> ${c.db.name} <small>${c.db.type} ${c.db.symbol||''}</small></label>`).join('');
+  }
+  if(need.sacrifice){
+    const spec = Object.assign({side:'mine',zone:'avatar'}, ab.cost.sacrificeMyAvatar===true?{}:ab.cost.sacrificeMyAvatar);
+    const list = FX.listTargets(st,me,spec).filter(c=>c.uid!==inst.uid);
+    h += `<h4>เซ่นไหว้</h4>` + radioList('pk-sac',list);
+  }
+  if(need.exile){
+    const list = FX.listTargets(st,me,ab.cost.exileBoard);
+    h += `<h4>เนรเทศจ่าย cost</h4>` + radioList('pk-ex',list);
+  }
+  if(need.equipCost){
+    let eqs = [];
+    p.avatar.forEach(a=>a.equipped.forEach(e=>{ if(!ab.cost.destroyEquipped.nameContains||(e.db.name||'').includes(ab.cost.destroyEquipped.nameContains)) eqs.push(e); }));
+    h += `<h4>ทำลายที่สวมใส่</h4>` + radioList('pk-eq',eqs);
+  }
+  if(need.host){
+    const spec = ab.hostSpec||{side:'mine',zone:'avatar'};
+    h += `<h4>เลือกเจ้าภาพสวมใส่</h4>` + radioList('pk-host',FX.listTargets(st,me,spec));
+  }
+  if(need.target){
+    h += `<h4>เลือกเป้าหมาย (${need.target.op})</h4>` + radioList('pk-tgt',FX.listTargets(st,me,need.target.spec));
+  }
+  if(need.scry){
+    const shown = FX.peekTop(st,me,need.scry.n);
+    h += `<h4>สอดแนม ${need.scry.n} (เลือกได้ไม่เกิน ${need.scry.pickMax||'ทั้งหมด'})</h4>` +
+      shown.map(s=>`<label style="display:block;padding:4px;border-bottom:1px dotted #333"><input type="checkbox" class="pk-scry" value="${s.uid}"> ${s.name} <small>${s.print}</small></label>`).join('');
+    if((need.scry.defaultDest||'hand')==='equipHost') h += `<h4>สวมให้ใคร</h4>` + radioList('pk-host',FX.listTargets(st,me,ab.hostSpec||{side:'mine',zone:'avatar'}));
+  }
+  if(need.rebuild){
+    const list = st.players[me].hell.filter(c=>{
+      if(c.db.type!=='Construct') return false;
+      const f = need.rebuild.filter||{};
+      if(f.notOnly && c.db.ex && /only/i.test(c.db.ex)) return false;
+      return true;
+    });
+    h += `<h4>เลือก Construct ในนรก (รวม Cost ≤ ${need.rebuild.totalCostMax}, ไม่เกิน ${need.rebuild.maxCount} ใบ)</h4>` +
+      list.map(c=>`<label style="display:block;padding:4px;border-bottom:1px dotted #333"><input type="checkbox" class="pk-rb" value="${c.uid}"> ${c.db.name} <small>Cost ${c.db.cost}</small></label>`).join('');
+  }
+  if(need.send){
+    const sym = ab.cost.sendSymbolToHell ? ab.cost.sendSymbolToHell.symbol : null;
+    const pool = sym ? st.players[me].avatar.concat(st.players[me].hand).filter(c=>c.db.symbol===sym) : st.players[me].hand.concat(st.players[me].avatar);
+    h += `<h4>ส่งลงนรกจ่าย cost${sym?' (Symbol '+sym+')':''}</h4>` + pool.map(c=>`<label style="display:block;padding:4px;border-bottom:1px dotted #333"><input type="checkbox" class="pk-send" value="${c.uid}"> ${c.db.name} <small>${c.db.type} ${c.db.symbol||''}</small></label>`).join('');
+  }
+  h += `<div style="display:flex;gap:8px;margin-top:10px"><button class="primary" id="pkOk">ยืนยัน</button><button id="pkX">ยกเลิก</button></div>`;
+  mbox(h);
+  document.getElementById('pkX').onclick = mclose;
+  document.getElementById('pkOk').onclick = ()=>{
+    const picks = {};
+    if(choiceIdx!=null) picks.choice = choiceIdx;
+    if(need.discard) picks.discardUids = Array.from(document.querySelectorAll('.pk-dis:checked')).map(x=>+x.value);
+    const q = n => { const el = document.querySelector(`input[name=${n}]:checked`); return el?+el.value:null; };
+    if(need.sacrifice) picks.sacrificeUid = q('pk-sac');
+    if(need.exile) picks.exileUid = q('pk-ex');
+    if(need.equipCost) picks.equipUid = q('pk-eq');
+    if(need.host|| (need.scry&&need.scry.defaultDest==='equipHost')) picks.hostUid = q('pk-host');
+    if(need.target) picks.targetUid = q('pk-tgt');
+    if(need.send) picks.sendUids = Array.from(document.querySelectorAll('.pk-send:checked')).map(x=>+x.value);
+    if(need.scry){
+      picks.scryChosen = Array.from(document.querySelectorAll('.pk-scry:checked')).map(x=>+x.value);
+      picks.scryDest = need.scry.defaultDest||'hand';
+      picks.scryRest = need.scry.defaultRest||'deckShuffle';
+    }
+    if(need.rebuild){
+      picks.rebuildUids = Array.from(document.querySelectorAll('.pk-rb:checked')).map(x=>+x.value);
+    }
+    doExec(picks);
+  };
+}
+function afterAction(){ drainQueues(); render(); }
+window.resumeAttackFrame = function(st, frame) {
+  setTimeout(() => {
+    const atk = st.players[frame.owner].avatar.find(a => a.uid === frame.atkUid);
+    if (!atk) return;
+    const ev = (st._evStack||[]).find(e=>e.id===frame.evId) || {negated:false};
+    if (ev.negated) { atk.battleBuff=0; atkUid=null; supSet=new Set(); render(); return; }
+    const p = st.players[frame.owner];
+    
+    if (frame.target.kind === 'avatar') {
+      const df = st.players[1-frame.owner].avatar.find(a=>a.uid===frame.target.uid);
+      if (df) finishAttackVsAvatar(p, atk, df, frame.power);
+    } else if (frame.target.kind === 'construct') {
+      const r = E.resolveBattle(st, frame.owner, atk, frame.target, frame.power);
+      atkUid=null; supSet=new Set(); if(!r.ok) alert(r.error);
+      if(SFX.attack) SFX.attack();
+      if(r.ok && mode === 'online') sendAction({ act: 'attack', atkUid: frame.atkUid, supUids: [], target: frame.target });
+      afterAction();
+    } else if (frame.target.kind === 'life') {
+      const r = E.resolveBattle(st, frame.owner, atk, frame.target, frame.power);
+      atkUid=null; supSet=new Set(); if(!r.ok) alert(r.error);
+      if(SFX.attack) SFX.attack();
+      if(r.ok && mode === 'online') sendAction({ act: 'attack', atkUid: frame.atkUid, supUids: [], target: frame.target });
+      if(r.lifeCard) alert('หงาย LIFE: '+r.lifeCard.card.db.name+'\n'+(r.lifeCard.card.db.mainEffect||''));
+      if(SFX.lifeFlip && r.lifeCard) SFX.lifeFlip();
+      afterAction();
+    }
+  }, 10);
+};
+let _draining = false;
+function drainQueues(){
+  if(!st||_draining) return;
+  if(document.getElementById('modal').style.display==='flex') return;
+  _draining = true;
+  try{
+    // paid-as-cost choices first
+    const ch = (st.pendingChoices||[]).find(c=>c.owner===viewSide);
+    if(ch){
+      const inst = FX.findInst(st,ch.uid);
+      const sc = inst && (window.BoTCardScripts||{})[inst.db.print];
+      const ab = sc && (sc.abilities||[]).find(a=>a.id===ch.abId);
+      const hosts = FX.listTargets(st,ch.owner,{side:'mine',zone:'avatar'});
+      let h = `<h3>${inst?inst.db.name:''} — เลือกเจ้าภาพสวมใส่</h3>` + radioList('pk-host',hosts) +
+        `<div style="display:flex;gap:8px;margin-top:10px"><button class="primary" id="pkOk">ยืนยัน</button><button id="pkX">ข้าม</button></div>`;
+      mbox(h);
+      document.getElementById('pkX').onclick = ()=>{ st.pendingChoices.splice(st.pendingChoices.indexOf(ch),1); mclose(); _draining=false; render(); };
+      document.getElementById('pkOk').onclick = ()=>{
+        const el = document.querySelector('input[name=pk-host]:checked');
+        const r = FX.execTriggered(st,ch.owner,ch.uid,ch.abId,{hostUid:el?+el.value:null});
+        st.pendingChoices.splice(st.pendingChoices.indexOf(ch),1);
+        mclose(); if(!r.ok) alert(r.error); _draining=false; afterAction(); return;
+      };
+      return;
+    }
+    // responses (with GEM + additional costs for React Magic; cancellation changes nothing)
+    const q = (st.pendingResponses||[]).find(r=>r.me===viewSide);
+    if(q){
+      const inst = FX.findInst(st,q.uid);
+      const sc = inst && (window.BoTCardScripts||{})[inst.db.print];
+      const ab = sc && (sc.abilities||[]).find(a=>a.id===q.abId);
+      const needGem = inst && inst.db.type==='Magic' && (inst.db.cost||0)>0;
+      let h = `<h3>สวนไหม? ${inst?inst.db.name:''}${ab&&ab.name?' — '+ab.name:''}</h3><p class="hint">จังหวะ: ${q.evType}${needGem?' | Cost '+(inst.db.cost||0):''}</p>
+        <div style="display:flex;gap:8px"><button class="primary" id="qUse">ใช้</button><button id="qPass">ผ่าน</button></div>`;
+      mbox(h);
+      document.getElementById('qPass').onclick = ()=>{ const r=FX.resolveQueued(st,q.key,false); if(mode==='online') sendAction({ act:'reactPass', key:q.key }); mclose(); _draining=false; afterAction(); return; };
+      document.getElementById('qUse').onclick = ()=>{
+        // gather picks if ability needs them OR GEM needed
+        const needPick = needGem || (ab && ((ab.cost&&(ab.cost.discard||ab.cost.sacrificeMyAvatar||ab.cost.exileBoard||ab.cost.destroyEquipped||ab.cost.sendSymbolToHell||ab.cost.sendNamedToHell))||ab.needsHost||
+          (ab.ops||[]).some(o=>o.op==='scry')||
+          (ab.ops||[]).some(o=>['destroy','bounce','exile','silence','buff','gainControl'].includes(o.op)&&o.spec&&!defaultEvTarget(o))));
+        if(!needPick){
+          const r = FX.resolveQueued(st,q.key,true,{});
+          if(mode==='online'&&r.ok) sendAction({ act:'reactUse', key:q.key, evId:q.evId, picks:{} });
+          mclose(); if(!r.ok) alert(r.error); _draining=false; afterAction(); return;
+        }
+        // open picks modal bound to queued resolve (preserves target/ability picks through payment)
+        mclose(); openQueuedPicks(q,ab);
+        _draining = false; return;
+      };
+      return;
+    }
+  } finally { if(document.getElementById('modal').style.display!=='flex') _draining=false; }
+}
+function defaultEvTarget(op){ return false; } // responses default target to event source in executor
+function openQueuedPicks(q,ab){
+  const inst = FX.findInst(st,q.uid);
+  // Generalize payment modal: GEM for React Magic + additional costs + target in one flow
+  const needGem = inst && inst.db.type==='Magic' && (inst.db.cost||0)>0;
+  if(!needGem){
+    openPicks(inst,ab,null,(picks)=>{
+      const r = FX.resolveQueued(st,q.key,true,picks);
+      if(mode==='online'&&r.ok) sendAction({ act:'reactUse', key:q.key, evId:q.evId, picks:picks });
+      mclose(); if(!r.ok) alert(r.error); afterAction();
+    },q.me);
+    return;
+  }
+  // GEM selection + ability picks preserved through payment
+  const p = st.players[q.me];
+  const need=inst.db.cost||0, color=inst.db.color||'';
+  let selGem=new Set();
+  const renderGem=()=>{
+    const gems=p.hand.filter(x=>x.uid!==inst.uid&&(x.db.gem||0)>0);
+    let sum=[...selGem].reduce((s,u)=>{ const x=p.hand.find(h=>h.uid===u); return s+(x?x.db.gem:0); },0);
+    const chk=E.checkPay(st,p,need,color,[...selGem].map(u=>p.hand.find(h=>h.uid===u)).filter(Boolean),inst.db.name,inst.uid);
+    let h=`<h3>สวนด้วย ${inst.db.name} (Cost ${need}${color?' สี'+color:''})</h3><p>GEM: ${sum}/${need} — ${chk.ok?'<b style="color:#4ade80">จ่ายได้</b>':'<span style="color:#f87171">'+(chk.error||'')+'</span>'}</p>`;
+    h+=gems.map(g=>`<div class="pay"><span>${g.db.name} (GEM ${g.db.gem})</span><button data-u="${g.uid}">${selGem.has(g.uid)?'เอาออก':'ทิ้งจ่าย'}</button></div>`).join('');
+    h+=`<div style="display:flex;gap:8px;margin-top:10px"><button class="primary" id="gOk" ${chk.ok?'':'disabled'}>ต่อไป</button><button id="gX">ยกเลิก</button></div><p class="hint">ยกเลิก = ไม่เปลี่ยนแปลงอะไร</p>`;
+    mbox(h);
+    document.getElementById('gX').onclick=mclose;
+    document.querySelectorAll('[data-u]').forEach(b=>b.onclick=()=>{ const u=+b.dataset.u; selGem.has(u)?selGem.delete(u):selGem.add(u); renderGem(); });
+    document.getElementById('gOk').onclick=()=>{
+      const payUids=[...selGem];
+      mclose();
+      openPicks(inst,ab,null,(picks)=>{
+        picks.payUids=payUids;
+        const r = FX.resolveQueued(st,q.key,true,picks);
+        if(mode==='online'&&r.ok) sendAction({ act:'reactUse', key:q.key, evId:q.evId, picks:picks });
+        mclose(); if(!r.ok) alert(r.error); afterAction();
+      },q.me);
+    };
+  };
+  renderGem();
+}
+function onTargetFoeAvatar(d){
+  if(!atkUid||st.phase!=='battle') return;
+  const p=st.players[st.cur], atk=p.avatar.find(a=>a.uid===atkUid);
+  const dec=E.declareAttack(st,st.cur,atkUid,[...supSet],{kind:'avatar',uid:d.uid});
+  if(!dec.ok){ alert(dec.error); return; }
+  if(dec.negated){ atkUid=null; supSet=new Set(); render(); return; }
+  if(dec.pending){ render(); return; } // suspended at response window; resolve after use/pass via drainQueues
+  // โล่มนุษย์: ถ้าฝ่ายกันมีตัวโล่และเป็นมนุษย์คุม -> ถาม
+  finishAttackVsAvatar(p,atk,d,dec.power);
+}
+function finishAttackVsAvatar(p,atk,d,power){
+  const f=st.players[1-st.cur];
+  const isAIdef = mode==='ai'&&f.idx===1;
+  const lomus=f.avatar.filter(x=>x.uid!==d.uid&&!x.tapped&&E.hasKwEff(x,'โล่มนุษย์'));
+  const doResolve=(finalD)=>{
+    const supUids = [...supSet];
+    const atkUidCopy = atk.uid;
+    const r=E.resolveBattle(st,st.cur,atk,{kind:'avatar',uid:finalD.uid},power);
+    atkUid=null; supSet=new Set();
+    if(!r.ok) alert(r.error);
+    if(SFX.attack) SFX.attack();
+    if(r.ok && mode === 'online') sendAction({ act: 'attack', atkUid: atkUidCopy, supUids: supUids, target: {kind:'avatar', uid:finalD.uid} });
+    render();
+  };
+  if(!lomus.length){ doResolve(d); return; }
+  if(isAIdef){
+    // AI: รับแทนถ้าตัวถูกตีแพงกว่าโล่
+    const lomu=lomus.sort((a,b)=>a.db.power-b.db.power)[0];
+    if(d.db.power>lomu.db.power){ const rr=E.redirectLomu(st,f.idx,lomu.uid); if(rr.ok){ doResolve(rr.redirectTo); return; } }
+    doResolve(d); return;
+  }
+  // modal ให้เลือกตัวโล่มนุษย์
+  let h = '<h3>โล่มนุษย์ — เลือกตัวรับแทน</h3>';
+  lomus.forEach(x => {
+    h += '<button style="width:100%;margin:4px 0" class="lomu-pick" data-uid="' + x.uid + '">' + x.db.name + ' (POW ' + E.effPower(x,0,st) + ')</button>';
+  });
+  h += '<button id="lomuPass" style="width:100%;margin:4px 0;border-color:#f87171">ไม่รับแทน</button>';
+  mbox(h);
+  document.getElementById('lomuPass').onclick = function() { mclose(); doResolve(d); };
+  document.querySelectorAll('.lomu-pick').forEach(function(b) {
+    b.onclick = function() {
+      var rr = E.redirectLomu(st, f.idx, +b.dataset.uid);
+      mclose();
+      if (!rr.ok) { alert(rr.error); doResolve(d); return; }
+      doResolve(rr.redirectTo);
+    };
+  });
+}
+function onTargetFoeCons(c){
+  if(!atkUid||st.phase!=='battle') return;
+  const p=st.players[st.cur], atk=p.avatar.find(a=>a.uid===atkUid);
+  const supUids = [...supSet];
+  const atkUidCopy = atkUid;
+  const dec=E.declareAttack(st,st.cur,atkUid,[...supSet],{kind:'construct',uid:c.uid});
+  if(!dec.ok){ alert(dec.error); return; }
+  if(dec.negated){ atkUid=null; supSet=new Set(); render(); return; }
+  if(dec.pending){ render(); return; }
+  const r=E.resolveBattle(st,st.cur,atk,{kind:'construct',uid:c.uid},dec.power);
+  atkUid=null; supSet=new Set(); if(!r.ok) alert(r.error);
+  if(SFX.attack) SFX.attack();
+  if(r.ok && mode === 'online') sendAction({ act: 'attack', atkUid: atkUidCopy, supUids: supUids, target: {kind:'construct', uid:c.uid} });
+  render();
+}
+function onTargetLife(f){
+  if(!atkUid||st.phase!=='battle') return;
+  if(f.idx===st.cur) return;
+  const p=st.players[st.cur], atk=p.avatar.find(a=>a.uid===atkUid);
+  if(!E.canAttackLife(st,atk,f)){ alert('ตี LIFE ไม่ได้ — ยังมี Avatar (ต้องเตะไข่)'); return; }
+  const dec=E.declareAttack(st,st.cur,atkUid,[...supSet],{kind:'life'});
+  if(!dec.ok){ alert(dec.error); return; }
+  if(dec.negated){ atkUid=null; supSet=new Set(); render(); return; }
+  if(dec.pending){ render(); return; }
+  const supUidsLife = [...supSet];
+  const atkUidLife = atkUid;
+  const r=E.resolveBattle(st,st.cur,atk,{kind:'life'},dec.power);
+  atkUid=null; supSet=new Set(); if(!r.ok) alert(r.error);
+  if(SFX.attack) SFX.attack();
+  if(r.ok && mode === 'online') sendAction({ act: 'attack', atkUid: atkUidLife, supUids: supUidsLife, target: {kind:'life'} });
+  if(r.lifeCard) alert('หงาย LIFE: '+r.lifeCard.card.db.name+'\n'+(r.lifeCard.card.db.mainEffect||''));
+  if(SFX.lifeFlip && r.lifeCard) SFX.lifeFlip();
+  render();
+}
+loadDB();
+</script>
+</body>
+</html>
