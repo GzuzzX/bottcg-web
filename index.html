@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Battle of Talingchan — Web</title>
+<style>
+*{box-sizing:border-box}body{font-family:system-ui,sans-serif;margin:0;background:#0b0b0f;color:#eee}
+header{padding:10px 14px;background:#000;border-bottom:2px solid #fff;display:flex;gap:8px;align-items:center;flex-wrap:wrap;position:sticky;top:0;z-index:5}
+header h1{margin:0;font-size:16px;flex:1;min-width:180px}
+header a,header button{padding:8px 12px;font-size:14px;border-radius:8px;border:1px solid #555;background:#222;color:#eee;text-decoration:none;cursor:pointer}
+header a.primary{background:#fff;color:#000;font-weight:800}
+nav{display:flex;gap:8px;padding:10px 14px;flex-wrap:wrap;background:#141419}
+nav input,nav select{padding:8px;font-size:14px;border-radius:6px;border:1px solid #444;background:#222;color:#eee}
+section{padding:12px 14px;max-width:1100px;margin:0 auto}
+h2{font-size:16px;margin:14px 0 8px}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(128px,1fr));gap:10px}
+.card{background:#1c1c22;border-radius:8px;overflow:hidden;cursor:pointer;border:2px solid transparent}
+.card:hover{border-color:#fff}
+.card img{width:100%;aspect-ratio:249/339;object-fit:cover;background:#333;display:block}
+.card .nm{padding:6px;font-size:12px;min-height:46px}
+.card .mt{font-size:11px;color:#aaa;padding:0 6px 6px}
+.deck{background:#16161c;border-radius:10px;padding:10px;margin:8px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.deck b{flex:1;min-width:140px}
+.deck small{color:#aaa;display:block}
+.deck button{padding:8px 10px;border-radius:8px;border:1px solid #555;background:#222;color:#eee;cursor:pointer}
+.deck button.go{background:#fff;color:#000;font-weight:800}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;z-index:30;padding:12px}
+#modal .box{background:#1c1c22;border-radius:12px;max-width:520px;width:100%;padding:14px;max-height:92vh;overflow:auto}
+#modal img{width:200px;float:left;margin-right:12px;border-radius:8px}
+.hint{font-size:12px;color:#aaa}
+#banimg{max-width:100%;border-radius:10px;border:1px solid #333}
+@media(max-width:768px){
+  #grid{grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px}
+  .card .nm{font-size:11px;padding:4px}
+  section{padding:8px}
+  header{flex-direction:column;gap:6px}
+}
+</style>
+</head>
+<body>
+<header>
+<h1>BATTLE OF TALINGCHAN — WEB</h1>
+<a class="primary" href="game.html">ดูเอล</a>
+<a href="decks.html">จัดเด็ค</a>
+<a href="#ban">แบนลิสต์</a>
+</header>
+
+<section>
+<h2>เด็คของฉัน (<span id="deckN">0</span>) <button id="btnNew" style="padding:6px 10px;border-radius:8px;border:1px solid #555;background:#222;color:#eee;cursor:pointer">+ สร้างเด็คใหม่</button></h2>
+<div id="decks"></div>
+
+<h2>การ์ดทั้งหมด (<span id="cardN">...</span>) — ใช้ได้ทุกใบ ไม่ต้องเปิดซอง</h2>
+<nav style="padding:0 0 10px;background:none;position:static">
+<input id="q" placeholder="ค้นชื่อ / print / เอฟเฟค..." style="flex:2;min-width:160px">
+<select id="fType"><option value="">ทุกประเภท</option><option>Avatar</option><option>Magic</option><option>Construct</option><option>Life</option><option>Token</option></select>
+<select id="fSeries"><option value="">ทุกซีรีส์</option></select>
+</nav>
+<div id="grid"></div>
+
+<h2 id="ban">แบนลิสต์ (ประกาศทางการ)</h2>
+<p class="hint">เว็บนี้ไม่มี banlist API แบบ structured — รูปด้านล่างคือประกาศทางการล่าสุดจากเว็บหลัก ถ้ามีอัปเดตให้ดูวันที่ในรูป แล้วจัดเด็คตาม</p>
+<img id="banimg" src="https://cdn.bangbon.app/banlists/banlist-yA0nvABOT_.webp" alt="Banlist" onerror="this.outerHTML='<p>โหลดรูปแบนลิสต์ไม่ได้ เปิดดูที่เว็บหลัก bottcg.com/rule</p>'">
+<p class="hint">กติกาฉบับเต็ม: <a href="https://cdn.bangbon.app/rules/rulebook-9PoUza3Yhi.pdf" style="color:#fff">rulebook PDF (เว็บหลัก)</a></p>
+</section>
+
+<div id="modal"><div class="box" id="mbox"></div></div>
+
+<script src="storage.js"></script>
+<script src="starter-decks.js"></script>
+<script>
+const S = window.BoTStore;
+function renderDecks(){
+  const list = S.listDecks();
+  document.getElementById('deckN').textContent = list.length;
+  const box = document.getElementById('decks'); box.innerHTML = '';
+  if(!list.length) box.innerHTML = '<p class="hint">ยังไม่มีเด็ค — กดสร้างเด็คใหม่ หรือเข้า "จัดเด็ค"</p>';
+  list.forEach(d=>{
+    const r = S.resolveDeck(d);
+    const div = document.createElement('div'); div.className = 'deck';
+    div.innerHTML = `<b>${d.name}<small>Main ${r.main.length}/50 · LIFE ${r.life.length}/5</small></b>
+      <button class="go" data-act="play">เล่น</button>
+      <button data-act="edit">แก้ไข</button>
+      <button data-act="del">ลบ</button>`;
+    div.querySelector('[data-act=play]').onclick = ()=>{ S.setActive(d.id); location.href='game.html'; };
+    div.querySelector('[data-act=edit]').onclick = ()=>{ location.href='decks.html?edit='+d.id; };
+    div.querySelector('[data-act=del]').onclick = ()=>{ if(confirm('ลบ '+d.name+'?')){ S.deleteDeck(d.id); renderDecks(); } };
+    box.appendChild(div);
+  });
+}
+document.getElementById('btnNew').onclick = ()=>{ location.href='decks.html'; };
+function filtered(){
+  const q = document.getElementById('q').value.trim().toLowerCase();
+  const t = document.getElementById('fType').value;
+  const s = document.getElementById('fSeries').value;
+  return S.DB.filter(c=>{
+    if(t && c.type!==t) return false;
+    if(s && !(c.print||'').startsWith(s)) return false;
+    if(q && !((c.name||'')+' '+(c.print||'')+' '+(c.mainEffect||'')).toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+var PAGE_SIZE = 200;
+function renderGrid(){
+  var g = document.getElementById('grid'); g.innerHTML='';
+  var all = filtered();
+  document.getElementById('cardN').textContent = all.length;
+  showCards(g, all, 0);
+}
+function showCards(g, all, from) {
+  var end = Math.min(from + PAGE_SIZE, all.length);
+  for (var i = from; i < end; i++) {
+    var c = all[i];
+    var d = document.createElement('div'); d.className='card';
+    d.innerHTML = '<img loading="lazy" src="' + S.imgUrl(c) + '" onerror="this.style.display=\'none\'"><div class="nm">' + c.name + '<br><small>' + c.print + ' [' + c.rare + ']</small></div><div class="mt">' + c.type + (c.subtype?' / '+c.subtype:'') + (c.cost!==undefined?' | C'+c.cost:'') + (c.power!==undefined?' | P'+c.power:'') + '</div>';
+    (function(card) {
+      d.onclick = function() {
+        var m = document.getElementById('modal'); m.style.display='flex';
+        document.getElementById('mbox').innerHTML =
+          '<img src="' + S.imgUrl(card) + '" onerror="this.style.display=\'none\'">' +
+          '<h3 style="margin-top:0">' + card.name + '</h3>' +
+          '<p><b>' + card.print + '</b> [' + card.rare + '] | ' + card.type + (card.subtype?' / '+card.subtype:'') + ' | สี:' + (card.color||'-') + ' | Symbol:' + (card.symbol||'-') + '</p>' +
+          '<p>Cost:' + (card.cost===undefined?'-':card.cost) + ' GEM:' + (card.gem===undefined?'-':card.gem) + (card.gemColor?'('+card.gemColor+')':'') + ' Power:' + (card.power===undefined?'-':card.power) + '</p>' +
+          '<p style="white-space:pre-wrap">' + (card.mainEffect||'') + '</p>' +
+          (card.hashtagText?'<p style="color:#fbbf24"># ' + card.hashtagText + '</p>':'') +
+          (card.ex?'<p style="color:#f87171">ex: ' + card.ex + '</p>':'') +
+          '<div style="clear:both"><button id="mX">ปิด</button></div>';
+        document.getElementById('mX').onclick = function() { m.style.display='none'; };
+        m.onclick = function(e) { if(e.target===m) m.style.display='none'; };
+      };
+    })(c);
+    g.appendChild(d);
+  }
+  var old = document.getElementById('loadMoreBtn');
+  if (old) old.remove();
+  if (end < all.length) {
+    var btn = document.createElement('button');
+    btn.id = 'loadMoreBtn';
+    btn.textContent = 'โหลดเพิ่ม (' + (all.length - end) + ' ใบ)';
+    btn.style.cssText = 'width:100%;padding:12px;margin:10px 0;border-radius:8px;background:#333;color:#eee;border:1px solid #555;cursor:pointer;font-size:14px';
+    btn.onclick = function() { showCards(g, all, end); };
+    g.parentElement.appendChild(btn);
+  }
+}
+(async function(){
+  await S.loadDB();
+  S.seedStarters();
+  S.seriesList().forEach(s=>{ const o=document.createElement('option'); o.value=s; o.textContent=s; document.getElementById('fSeries').appendChild(o); });
+  renderDecks(); renderGrid();
+  document.getElementById('q').oninput = renderGrid;
+  document.getElementById('fType').onchange = renderGrid;
+  document.getElementById('fSeries').onchange = renderGrid;
+})();
+</script>
+</body>
+</html>

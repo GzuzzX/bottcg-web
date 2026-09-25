@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>จัดเด็ค — Battle of Talingchan</title>
+<style>
+*{box-sizing:border-box}body{font-family:system-ui,sans-serif;margin:0;background:#0b0b0f;color:#eee}
+header{padding:10px 14px;background:#000;border-bottom:2px solid #fff;display:flex;gap:8px;align-items:center;position:sticky;top:0;z-index:5}
+header h1{margin:0;font-size:16px;flex:1}
+header a{padding:8px 12px;border-radius:8px;border:1px solid #555;background:#222;color:#eee;text-decoration:none}
+main{display:grid;grid-template-columns:1fr 360px;gap:10px;padding:10px;max-width:1200px;margin:0 auto}
+@media(max-width:900px){main{grid-template-columns:1fr}}
+nav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+nav input,nav select{padding:8px;font-size:14px;border-radius:6px;border:1px solid #444;background:#222;color:#eee}
+#pool{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:8px;max-height:75vh;overflow:auto}
+.mini{background:#1c1c22;border-radius:8px;overflow:hidden;cursor:pointer;border:2px solid transparent;font-size:11px}
+.mini img{width:100%;aspect-ratio:249/339;object-fit:cover;background:#333;display:block}
+.mini .t{padding:4px;min-height:40px}
+aside{background:#141419;border-radius:10px;padding:10px;height:fit-content;position:sticky;top:64px}
+aside h3{margin:4px 0;font-size:14px}
+.lst{max-height:200px;overflow:auto;background:#0b0b0f;border-radius:6px;padding:6px;font-size:12px;margin:4px 0 8px}
+.lst div{display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px dotted #333;gap:6px}
+.ok{color:#4ade80}.bad{color:#f87171}
+.row{font-size:13px;margin:3px 0}
+input[type=text]{width:100%;padding:8px;border-radius:6px;border:1px solid #444;background:#222;color:#eee;margin:4px 0}
+button{padding:8px 10px;border-radius:8px;border:1px solid #555;background:#222;color:#eee;cursor:pointer}
+button.primary{background:#fff;color:#000;font-weight:800}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;z-index:30;padding:12px}
+#modal .box{background:#1c1c22;border-radius:12px;max-width:520px;width:100%;padding:14px;max-height:92vh;overflow:auto}
+#modal img{width:200px;float:left;margin-right:12px;border-radius:8px}
+@media(max-width:600px){
+  main{grid-template-columns:1fr!important}
+  aside{position:static!important}
+  #pool{max-height:50vh}
+}
+</style>
+</head>
+<body>
+<header><h1>จัดเด็ค (ใช้ได้ทุกใบ)</h1><a href="index.html">หน้าแรก</a><a href="game.html">ดูเอล</a></header>
+<main>
+<div>
+<nav>
+<input id="q" placeholder="ค้น..." style="flex:2;min-width:140px">
+<select id="fType"><option value="">ทุกประเภท</option><option>Avatar</option><option>Magic</option><option>Construct</option><option>Life</option><option>Token</option></select>
+<select id="fSeries"><option value="">ทุกซีรีส์</option></select>
+</nav>
+<div id="pool"></div>
+</div>
+<aside>
+<input type="text" id="dname" placeholder="ชื่อเด็ค">
+<h3>Main <span id="cMain">0</span>/50</h3>
+<div class="row" id="vOnly">-</div>
+<div class="row" id="vCopy">-</div>
+<div class="lst" id="lMain"></div>
+<h3>LIFE <span id="cLife">0</span>/5</h3>
+<div class="lst" id="lLife"></div>
+<div class="row" id="vAll">-</div>
+<div id="deckStats" style="font-size:12px;margin-top:8px;padding:8px;background:#0b0b0f;border-radius:6px"></div>
+<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+<button class="primary" id="btnSave">บันทึกเด็ค</button>
+<button id="btnPlay">บันทึก+ไปดูเอล</button>
+<button id="btnClear">ล้าง</button>
+<button id="btnExport">📋 Export</button>
+</div>
+<h3 style="margin-top:10px">นำเข้าจากเว็บหลัก</h3>
+<input type="text" id="impUrl" placeholder="วางลิงก์เด็ค bottcg.com/decks/...">
+<button id="btnImport" style="width:100%">ดึงเด็คมาใส่</button>
+<div class="row hint" id="impMsg" style="color:#aaa"></div>
+<h3 style="margin-top:10px">นำเข้าจากรหัสลิสต์</h3>
+<textarea id="impText" rows="6" style="width:100%;padding:8px;border-radius:6px;border:1px solid #444;background:#222;color:#eee" placeholder="วางลิสต์แบบ&#10;2x BT01-038-SR&#10;...&#10;# Life Cards&#10;1x BT05-071-C"></textarea>
+<button id="btnImportText" style="width:100%">ใส่ลิสต์นี้เข้าเด็ค</button>
+<div class="row hint" id="impTextMsg" style="color:#aaa"></div>
+</aside>
+</main>
+<div id="modal"><div class="box" id="mbox"></div></div>
+<script src="storage.js"></script>
+<script src="starter-decks.js"></script>
+<script src="engine.js"></script>
+<script>
+const S = window.BoTStore, E = window.BoTEngine;
+let main = [], life = [], editId = null;
+const qp = new URLSearchParams(location.search);
+if (qp.get('edit')) editId = qp.get('edit');
+
+function pool(){
+  const q = document.getElementById('q').value.trim().toLowerCase();
+  const t = document.getElementById('fType').value;
+  const s = document.getElementById('fSeries').value;
+  return S.byPrint().filter(c=>{
+    if(t && c.type!==t) return false;
+    if(s && !(c.print||'').startsWith(s)) return false;
+    if(q && !((c.name||'')+' '+(c.print||'')+' '+(c.mainEffect||'')).toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+var PAGE_SIZE = 200;
+function renderPool(){
+  const p = document.getElementById('pool'); p.innerHTML='';
+  var all = pool();
+  showPool(p, all, 0);
+}
+function showPool(p, all, from) {
+  var end = Math.min(from + PAGE_SIZE, all.length);
+  for (var i = from; i < end; i++) {
+    (function(c){
+    const d = document.createElement('div'); d.className='mini';
+    var ban = typeof E.isBanned === 'function' && E.isBanned(c.print);
+    d.innerHTML = `<img loading="lazy" src="${S.imgUrl(c)}" onerror="this.style.display='none'"><div class="t">${c.name}${ban?'<br><b style="color:#f87171">BANNED</b>':''}<br><small>${c.print}</small></div>`;
+    d.onclick = ()=>{
+      const m = document.getElementById('modal'); m.style.display='flex';
+      document.getElementById('mbox').innerHTML =
+        `<img src="${S.imgUrl(c)}" onerror="this.style.display='none'">
+         <h3 style="margin-top:0">${c.name}</h3>
+         <p><b>${c.print}</b> [${c.rare}] | ${c.type}${c.subtype?' / '+c.subtype:''} | สี:${c.color||'-'} | ${c.symbol||'-'}</p>
+         <p>Cost:${c.cost===undefined?'-':c.cost} GEM:${c.gem===undefined?'-':c.gem} Power:${c.power===undefined?'-':c.power}</p>
+         <p style="white-space:pre-wrap">${c.mainEffect||''}</p>
+         ${c.hashtagText?`<p style="color:#fbbf24"># ${c.hashtagText}</p>`:''}
+         ${c.ex?`<p style="color:#f87171">ex: ${c.ex}</p>`:''}
+         <div style="clear:both;display:flex;gap:8px"><button class="primary" id="mM">+ Main</button><button id="mL">+ LIFE</button><button id="mX">ปิด</button></div>`;
+      document.getElementById('mX').onclick = ()=>m.style.display='none';
+      m.onclick = (e)=>{ if(e.target===m) m.style.display='none'; };
+      document.getElementById('mM').onclick = ()=>{ addMain(c); m.style.display='none'; };
+      document.getElementById('mL').onclick = ()=>{ addLife(c); m.style.display='none'; };
+    };
+    p.appendChild(d);
+    })(all[i]);
+  }
+  var old = document.getElementById('poolMoreBtn');
+  if (old) old.remove();
+  if (end < all.length) {
+    var btn = document.createElement('button');
+    btn.id = 'poolMoreBtn';
+    btn.textContent = 'โหลดเพิ่ม (' + (all.length - end) + ' ใบ)';
+    btn.style.cssText = 'width:100%;padding:12px;margin:10px 0;border-radius:8px;background:#333;color:#eee;border:1px solid #555;cursor:pointer;font-size:14px';
+    btn.onclick = function() { showPool(p, all, end); };
+    p.parentElement.appendChild(btn);
+  }
+}
+function cnt(arr){ const m={}; arr.forEach(c=>m[c.name]=(m[c.name]||0)+1); return m; }
+function addMain(c){
+  if(['Avatar','Magic','Construct'].indexOf(c.type)<0){ alert('Main ใส่ได้เฉพาะ Avatar/Magic/Construct'); return; }
+  if(main.length>=50){ alert('Main ครบ 50 แล้ว'); return; }
+  const cc = cnt(main);
+  if(c.ex && /only/i.test(c.ex) && main.some(x=>x.ex&&/only/i.test(x.ex))){ alert('Only #1 มีได้ใบเดียว'); return; }
+  if((cc[c.name]||0) >= (c.customLimit||4)){ alert(c.name+' เกินลิมิต '+(c.customLimit||4)); return; }
+  main.push(c); update();
+}
+function addLife(c){
+  if(life.length>=5){ alert('LIFE ครบ 5 แล้ว'); return; }
+  if(life.some(x=>x.name===c.name)){ alert('LIFE ชื่อห้ามซ้ำ'); return; }
+  life.push(c); update();
+}
+function update(){
+  document.getElementById('cMain').textContent = main.length;
+  document.getElementById('cLife').textContent = life.length;
+  const lm = document.getElementById('lMain'); lm.innerHTML='';
+  main.forEach((c,i)=>{ const d=document.createElement('div'); d.innerHTML=`<span>${c.name} <small>${c.print}</small></span><button data-i="${i}">x</button>`; lm.appendChild(d); });
+  lm.querySelectorAll('button').forEach(b=>b.onclick=()=>{ main.splice(+b.dataset.i,1); update(); });
+  const ll = document.getElementById('lLife'); ll.innerHTML='';
+  life.forEach((c,i)=>{ const d=document.createElement('div'); d.innerHTML=`<span>${c.name}</span><button data-i="${i}">x</button>`; ll.appendChild(d); });
+  ll.querySelectorAll('button').forEach(b=>b.onclick=()=>{ life.splice(+b.dataset.i,1); update(); });
+  const errs = E.validateDecks(main, life);
+  const onlys = main.filter(c=>c.ex&&/only/i.test(c.ex));
+  document.getElementById('vOnly').innerHTML = onlys.length===1?`<span class="ok">Only #1: ${onlys[0].name}</span>`:`<span class="bad">Only #1 ต้องมี 1 ใบ (มี ${onlys.length})</span>`;
+  const over = Object.keys(cnt(main)).filter(n=>{ const s=main.find(c=>c.name===n); return cnt(main)[n]>(s.customLimit||4); });
+  document.getElementById('vCopy').innerHTML = over.length?`<span class="bad">เกินลิมิต: ${over.join(', ')}</span>`:`<span class="ok">จำนวนซ้ำผ่าน</span>`;
+  document.getElementById('vAll').innerHTML = !errs.length?`<span class="ok">เด็คถูกต้องพร้อมแข่ง</span>`:`<span class="bad">${errs.join('<br>')}</span>`;
+  // Deck Statistics
+  var stats = document.getElementById('deckStats');
+  if (!main.length) { stats.innerHTML = ''; return; }
+  var byType = {}, byColor = {}, byCost = {};
+  main.forEach(function(c) {
+    byType[c.type] = (byType[c.type] || 0) + 1;
+    byColor[c.color || 'ไม่มีสี'] = (byColor[c.color || 'ไม่มีสี'] || 0) + 1;
+    var cost = c.cost === undefined ? '-' : c.cost;
+    byCost[cost] = (byCost[cost] || 0) + 1;
+  });
+  var gemTotal = main.reduce(function(s, c) { return s + (c.gem || 0); }, 0);
+  var avgGem = (gemTotal / main.length).toFixed(1);
+  var h = '<b>📊 สถิติเด็ค</b><br>';
+  h += '<b>Type:</b> ' + Object.entries(byType).map(function(e) { return e[0] + ' ' + e[1]; }).join(' · ') + '<br>';
+  h += '<b>สี:</b> ' + Object.entries(byColor).map(function(e) { return e[0] + ' ' + e[1]; }).join(' · ') + '<br>';
+  h += '<b>Cost curve:</b> ' + Object.keys(byCost).sort(function(a,b){return a-b;}).map(function(k) { return 'C' + k + ':' + byCost[k]; }).join(' ') + '<br>';
+  h += '<b>GEM เฉลี่ย:</b> ' + avgGem + ' (รวม ' + gemTotal + ')';
+  stats.innerHTML = h;
+}
+function doSave(go){
+  const name = document.getElementById('dname').value.trim() || ('เด็ค ' + new Date().toLocaleString('th-TH'));
+  const errs = E.validateDecks(main, life);
+  if(errs.length && !confirm('เด็คยังไม่ถูกกติกา:\n'+errs.join('\n')+'\nบันทึกอยู่ดี?')) return null;
+  const d = S.saveDeck({ id: editId, name, main: main.map(c=>c.print), life: life.map(c=>c.print) });
+  editId = d.id; S.setActive(d.id);
+  if(go) location.href='game.html';
+  else alert('บันทึกแล้ว');
+  return d;
+}
+document.getElementById('btnSave').onclick = ()=>doSave(false);
+document.getElementById('btnPlay').onclick = ()=>doSave(true);
+document.getElementById('btnClear').onclick = ()=>{ if(confirm('ล้างทั้งหมด?')){ main=[]; life=[]; update(); } };
+document.getElementById('btnExport').onclick = function() {
+  if (!main.length && !life.length) { alert('ยังไม่มีการ์ดในเด็ค'); return; }
+  var cnt = {};
+  main.forEach(function(c) { cnt[c.print] = (cnt[c.print] || 0) + 1; });
+  var text = '# Main Deck (' + main.length + '/50)\n';
+  Object.keys(cnt).sort().forEach(function(p) {
+    var c = main.find(function(x) { return x.print === p; });
+    text += cnt[p] + 'x ' + p + '-' + c.rare + '  // ' + c.name + '\n';
+  });
+  text += '\n# Life Cards (' + life.length + '/5)\n';
+  life.forEach(function(c) { text += '1x ' + c.print + '-' + c.rare + '  // ' + c.name + '\n'; });
+  navigator.clipboard.writeText(text).then(function() {
+    alert('คัดลอกเด็คลิสต์ไปยัง clipboard แล้ว!');
+  }).catch(function() {
+    var m = document.getElementById('modal'); m.style.display = 'flex';
+    document.getElementById('mbox').innerHTML = '<h3>คัดลอกเด็คลิสต์</h3><textarea style="width:100%;height:300px;background:#222;color:#eee;border:1px solid #444;border-radius:6px;padding:8px;font-size:12px" readonly>' +
+      text.replace(/</g,'&lt;') + '</textarea><br><button id="mX">ปิด</button>';
+    document.getElementById('mX').onclick = function() { m.style.display = 'none'; };
+  });
+};
+document.getElementById('btnImport').onclick = async ()=>{
+  const msg = document.getElementById('impMsg');
+  msg.textContent = 'กำลังดึง...';
+  try {
+    const r = await S.importFromBottcg(document.getElementById('impUrl').value);
+    editId = r.deck.id; S.setActive(r.deck.id);
+    document.getElementById('dname').value = r.deck.name;
+    const res = S.resolveDeck(r.deck); main = res.main; life = res.life; update();
+    msg.textContent = 'นำเข้า "' + r.deck.name + '" แล้ว' + (r.missing.length ? ' (ขาด ' + r.missing.length + ' ใบที่ไม่มีใน DB นี้: ' + r.missing.slice(0,5).join(',') + ')' : ' ครบทุกใบ');
+  } catch(e){ msg.textContent = 'นำเข้าตรงไม่ได้ (เว็บหลักบล็อก CORS) — ส่งลิงก์เด็คมา เดี๋ยวเพิ่มให้เป็นชุดเริ่มต้นแบบใบนี้ หรือเปิดเด็คในเบราว์เซอร์แล้วจัดตามในหน้านี้ได้เลย'; }
+};
+document.getElementById('btnImportText').onclick = ()=>{
+  const msg = document.getElementById('impTextMsg');
+  const r = S.parseDeckList(document.getElementById('impText').value);
+  if(!r.main.length && !r.life.length){ msg.textContent = 'ไม่เจอลิสต์ — วางบรรทัดแบบ "2x BT01-038-SR"'; return; }
+  const resMain = r.main.map(S.findPrint).filter(Boolean);
+  const resLife = r.life.map(S.findPrint).filter(Boolean);
+  main = resMain; life = resLife; update();
+  msg.textContent = 'ใส่แล้ว Main ' + resMain.length + '/50 · LIFE ' + resLife.length + '/5' + (r.bad.length ? ' — มีปัญหา: ' + r.bad.slice(0,4).join(' / ') : '');
+};
+(async function(){
+  await S.loadDB();
+  S.seedStarters();
+  S.seriesList().forEach(s=>{ const o=document.createElement('option'); o.value=s; o.textContent=s; document.getElementById('fSeries').appendChild(o); });
+  if(editId){
+    const d = S.getDeck(editId);
+    if(d){ document.getElementById('dname').value = d.name; const r = S.resolveDeck(d); main = r.main; life = r.life; }
+    else editId = null;
+  }
+  renderPool(); update();
+  document.getElementById('q').oninput = renderPool;
+  document.getElementById('fType').onchange = renderPool;
+  document.getElementById('fSeries').onchange = renderPool;
+})();
+</script>
+</body>
+</html>
