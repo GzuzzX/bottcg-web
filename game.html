@@ -657,16 +657,7 @@ function cardMini(c,extra){
       checkMulligan();
     };
   }
-;
-    });
-    document.getElementById('mulDone').onclick = () => {
-      mclose();
-      const r = E.mulligan(st, pIdx, sel);
-      if (mode === 'online') sendAction({ act: 'mulligan', uid: 0, payUids: sel });
-      afterAction();
-      checkMulligan();
-    };
-  }
+
 function render(){
   if(!st) return;
   if(st.winner !== null && st.winner !== undefined && !st._sfxPlayed) {
