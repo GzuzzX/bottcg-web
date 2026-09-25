@@ -131,18 +131,43 @@
   }
   function newGame(mainDb1, lifeDb1, mainDb2, lifeDb2) {
     UID = 1;
-    const startCur = Math.floor(Math.random() * 2);
     const st = {
       players: [newPlayer(mainDb1, lifeDb1, 0), newPlayer(mainDb2, lifeDb2, 1)],
-      land: null, turn: 1, cur: startCur, phase: 'mulligan',
+      land: null, turn: 1, cur: 0, phase: 'rps',
       winner: null, winReason: '', log: [],
       stack: [], pendingOps: [], battleCount: 0,
-      mulliganDone: [false, false]
+      mulliganDone: [false, false],
+      rps: [null, null]
     };
-    // setup: draw 5 each
-    for (const p of st.players) p.hand = p.main.splice(0, 5);
-    slog(st, 'Setup: สุ่มได้ P' + (startCur + 1) + ' เริ่มก่อน. จั่วคนละ 5 ใบ (รอเปลี่ยนการ์ด)');
+    slog(st, 'Setup: เป่ายิ้งฉุบหาคนเริ่มก่อน');
     return st;
+  }
+  function submitRPS(st, pIdx, choice) {
+    if (st.phase !== 'rps') return { ok: false, error: 'ไม่ใช่ช่วงเป่ายิ้งฉุบ' };
+    st.rps[pIdx] = choice;
+    
+    if (st.rps[0] && st.rps[1]) {
+      const c0 = st.rps[0];
+      const c1 = st.rps[1];
+      if (c0 === c1) {
+        st.rps = [null, null];
+        slog(st, 'เป่ายิ้งฉุบ: เสมอ (' + c0 + ')');
+        return { ok: true, result: 'tie' };
+      }
+      let winner;
+      if (c0 === 'rock') winner = c1 === 'scissors' ? 0 : 1;
+      else if (c0 === 'scissors') winner = c1 === 'paper' ? 0 : 1;
+      else if (c0 === 'paper') winner = c1 === 'rock' ? 0 : 1;
+      
+      st.cur = winner;
+      slog(st, 'เป่ายิ้งฉุบ: P' + (winner + 1) + ' ชนะได้เริ่มก่อน');
+      
+      for (const p of st.players) p.hand = p.main.splice(0, 5);
+      
+      st.phase = 'mulligan';
+      slog(st, 'Setup: จั่วคนละ 5 ใบ (รอเปลี่ยนการ์ด)');
+    }
+    return { ok: true };
   }
   function mulligan(st, pIdx, returnUids) {
     if (st.phase !== 'mulligan') return { ok: false, error: 'ไม่ใช่ช่วงเปลี่ยนการ์ด' };
@@ -1016,7 +1041,7 @@
   }
 
   return {
-    newGame, mulligan, validateDecks, isBanned, doDrawPhase, drawOne, nextPhase, enterMain, skipBattle,
+    newGame, submitRPS, mulligan, validateDecks, isBanned, doDrawPhase, drawOne, nextPhase, enterMain, skipBattle,
     summonAvatar, buildConstruct, playMagic, checkPay, payCost, gemLimitFor, validateGem,
     declareAttack, redirectLomu, resolveBattle, canAttackLife, cantTarget,
     destroyInst, exileInst, bounceInst, deckReturnInst, summonFromZone,

@@ -402,7 +402,9 @@ function sendAction(action) {
 function replayAction(action, from) {
   if (!st) return;
   try {
-    if (action.act === 'summon') E.summonAvatar(st, from, action.uid, action.payUids);
+    if (action.act === 'rps') { E.submitRPS(st, from, action.choice); checkRPS(); return; }
+      else if (action.act === 'mulligan') { E.mulligan(st, from, action.payUids); checkMulligan(); return; }
+      else if (action.act === 'summon') E.summonAvatar(st, from, action.uid, action.payUids);
     else if (action.act === 'build') E.buildConstruct(st, from, action.uid, action.payUids);
     else if (action.act === 'magic') E.playMagic(st, from, action.uid, action.opts || {});
     else if (action.act === 'attack') {
@@ -504,7 +506,7 @@ document.getElementById('btnStart').onclick=()=>{
   viewSide=0; render();
   FX.setHumanSides(mode==='ai' ? [0] : [0, 1]);
   if(mode==='ai'&&st.cur===1) setTimeout(botTurn,600);
-  checkMulligan();
+  checkRPS();
 };
 document.getElementById('btnNew').onclick=()=>location.reload();
 document.getElementById('btnPhase').onclick=()=>{
@@ -599,15 +601,45 @@ function cardMini(c,extra){
   d.onfocus = function() { updateInspector(c.db || c); };
   return d;
 }
+
+  function checkRPS() {
+    if (!st || st.phase !== 'rps') { checkMulligan(); return; }
+    let pIdx = (mode === 'hot' && !st.rps[0]) ? 0 : (mode === 'hot' && !st.rps[1]) ? 1 : viewSide;
+    if (mode === 'ai' && !st.rps[1]) {
+      const choices = ['rock', 'paper', 'scissors'];
+      E.submitRPS(st, 1, choices[Math.floor(Math.random()*3)]);
+    }
+    if (st.rps[pIdx]) { render(); return; }
+    
+    let html = '<h3>เป่ายิ้งฉุบ P' + (pIdx + 1) + ' หาคนเริ่มก่อน</h3>' +
+               '<div style="display:flex;gap:8px;justify-content:center;padding:20px">' +
+               '<button class="rps-btn primary" data-choice="rock" style="font-size:24px">ค้อน</button>' +
+               '<button class="rps-btn primary" data-choice="paper" style="font-size:24px">กระดาษ</button>' +
+               '<button class="rps-btn primary" data-choice="scissors" style="font-size:24px">กรรไกร</button>' +
+               '</div>';
+    mbox(html);
+    
+    document.querySelectorAll('.rps-btn').forEach(btn => {
+      btn.onclick = () => {
+        mclose();
+        E.submitRPS(st, pIdx, btn.dataset.choice);
+        if (mode === 'online') sendAction({ act: 'rps', choice: btn.dataset.choice });
+        afterAction();
+        if (mode === 'ai' && st.cur === 1) setTimeout(botTurn, 600);
+        checkRPS();
+      };
+    });
+  }
+
   function checkMulligan() {
     if (!st || st.phase !== 'mulligan') { render(); return; }
     let pIdx = (mode === 'hot' && !st.mulliganDone[0]) ? 0 : (mode === 'hot' && !st.mulliganDone[1]) ? 1 : viewSide;
     if (mode === 'ai' && !st.mulliganDone[1]) { E.mulligan(st, 1, []); }
     if (st.mulliganDone[pIdx]) { render(); return; }
     const hand = st.players[pIdx].hand;
-    let html = '<h3>???????????? P' + (pIdx + 1) + ' (Mulligan)</h3><p>???????????????????????????????? (??????????????????)</p><div style="display:flex;gap:4px;flex-wrap:wrap">';
+    let html = '<h3>เปลี่ยนการ์ด P' + (pIdx + 1) + ' (Mulligan)</h3><p>เลือกการ์ดที่ต้องการเอาไว้ใต้กอง (จะไม่เลือกเลยก็ได้)</p><div style="display:flex;gap:4px;flex-wrap:wrap">';
     hand.forEach(c => { html += '<button class="mul-card" data-uid="' + c.uid + '">' + (c.db.name || '?') + '</button>'; });
-    html += '</div><br><button id="mulDone" class="primary" style="width:100%">??????????????????</button>';
+    html += '</div><br><button id="mulDone" class="primary" style="width:100%">ยืนยันเปลี่ยนการ์ด</button>';
     mbox(html);
     let sel = [];
     document.querySelectorAll('.mul-card').forEach(btn => {
@@ -616,6 +648,16 @@ function cardMini(c,extra){
         if (sel.includes(uid)) { sel = sel.filter(u => u !== uid); btn.style.opacity = '1'; }
         else { sel.push(uid); btn.style.opacity = '0.5'; }
       };
+    });
+    document.getElementById('mulDone').onclick = () => {
+      mclose();
+      E.mulligan(st, pIdx, sel);
+      if (mode === 'online') sendAction({ act: 'mulligan', payUids: sel });
+      afterAction();
+      checkMulligan();
+    };
+  }
+;
     });
     document.getElementById('mulDone').onclick = () => {
       mclose();
@@ -1161,5 +1203,3 @@ function onTargetLife(f){
 loadDB();
 </script>
 </body>
-      if (action.act === 'mulligan') { E.mulligan(st, from, action.payUids); checkMulligan(); return; }
-      if (action.act === 'summon') E.summonAvatar(st, from, action.uid, action.payUids);
