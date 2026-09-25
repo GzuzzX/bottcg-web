@@ -337,13 +337,13 @@ body.duel-active .life{width:var(--field-card-w);height:auto;aspect-ratio:5/7;mi
   <button id="turnReady" class="primary" style="font-size:18px;padding:16px 32px">พร้อมแล้ว</button>
 </div>
 
-<script src="storage.js"></script>
-<script src="starter-decks.js"></script>
-<script src="engine.js"></script>
-<script src="ai.js"></script>
-<script src="effects.js"></script>
-<script src="card-scripts.js"></script>
-<script src="card-scripts-auto.js"></script>
+<script src="storage.js?v=1790336642033"></script>
+<script src="starter-decks.js?v=1790336642033"></script>
+<script src="engine.js?v=1790336625331"></script>
+<script src="ai.js?v=1790336642033"></script>
+<script src="effects.js?v=1790336642033"></script>
+<script src="card-scripts.js?v=1790336642033"></script>
+<script src="card-scripts-auto.js?v=1790336642033"></script>
 <script src="sounds.js"></script>
 <script>
 const E = window.BoTEngine, BOT = window.BoTBot, S = window.BoTStore, FX = window.BoTEffects;
@@ -503,7 +503,7 @@ document.getElementById('btnStart').onclick=()=>{
   document.getElementById('game-container').style.display='flex';
   document.getElementById('board').style.display='grid';
   document.getElementById('deckInfo').textContent='P1 50+5 vs P2 50+5 | err: '+(e1.concat(e2).join('; ')||'none');
-  viewSide=0; render();
+  viewSide = (mode === 'online' && typeof mySide !== 'undefined' && mySide !== null) ? mySide : 0; render();
   FX.setHumanSides(mode==='ai' ? [0] : [0, 1]);
   if(mode==='ai'&&st.cur===1) setTimeout(botTurn,600);
   checkRPS();
