@@ -131,16 +131,42 @@
   }
   function newGame(mainDb1, lifeDb1, mainDb2, lifeDb2) {
     UID = 1;
+    const startCur = Math.floor(Math.random() * 2);
     const st = {
       players: [newPlayer(mainDb1, lifeDb1, 0), newPlayer(mainDb2, lifeDb2, 1)],
-      land: null, turn: 1, cur: 0, phase: 'draw',
+      land: null, turn: 1, cur: startCur, phase: 'mulligan',
       winner: null, winReason: '', log: [],
       stack: [], pendingOps: [], battleCount: 0,
+      mulliganDone: [false, false]
     };
     // setup: draw 5 each
     for (const p of st.players) p.hand = p.main.splice(0, 5);
-    slog(st, 'Setup: จั่วคนละ 5 ใบ');
+    slog(st, 'Setup: สุ่มได้ P' + (startCur + 1) + ' เริ่มก่อน. จั่วคนละ 5 ใบ (รอเปลี่ยนการ์ด)');
     return st;
+  }
+  function mulligan(st, pIdx, returnUids) {
+    if (st.phase !== 'mulligan') return { ok: false, error: 'ไม่ใช่ช่วงเปลี่ยนการ์ด' };
+    if (st.mulliganDone[pIdx]) return { ok: false, error: 'เปลี่ยนการ์ดไปแล้ว' };
+    const p = st.players[pIdx];
+    const returning = [];
+    for (const uid of returnUids) {
+      const i = p.hand.findIndex(c => c.uid === uid);
+      if (i >= 0) returning.push(p.hand.splice(i, 1)[0]);
+    }
+    // draw same amount
+    for (let i = 0; i < returning.length; i++) {
+      p.hand.push(p.main.shift());
+    }
+    // put returned cards at the bottom of the deck
+    p.main.push(...returning);
+    st.mulliganDone[pIdx] = true;
+    slog(st, 'P' + (pIdx + 1) + ' เปลี่ยนการ์ด ' + returning.length + ' ใบ');
+    
+    if (st.mulliganDone[0] && st.mulliganDone[1]) {
+      st.phase = 'draw';
+      doDrawPhase(st);
+    }
+    return { ok: true };
   }
   function slog(st, t) { st.log.push('T' + st.turn + ' P' + (st.cur + 1) + ' [' + st.phase + '] ' + t); }
   function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
@@ -157,8 +183,12 @@
     const p = me(st);
     p.avatar.forEach(a => { a.tapped = false; a.battleBuff = 0; a.snapshot = null; });
     let need;
-    if (st.turn === 1 && st.cur === 0) need = 2; // first player first turn draws 2
-    else need = p.hand.length < 3 ? 3 - p.hand.length : 1;
+    if (!st._firstDrawDone) {
+      need = 2;
+      st._firstDrawDone = true;
+    } else {
+      need = p.hand.length < 3 ? 3 - p.hand.length : 1;
+    }
     for (let i = 0; i < need; i++) { if (!drawOne(st, p)) break; }
     slog(st, 'Draw: จั่ว ' + need + ' (มือ ' + p.hand.length + ')');
     fx('onDrawEnd', st, st.cur);
@@ -986,7 +1016,7 @@
   }
 
   return {
-    newGame, validateDecks, isBanned, doDrawPhase, drawOne, nextPhase, enterMain, skipBattle,
+    newGame, mulligan, validateDecks, isBanned, doDrawPhase, drawOne, nextPhase, enterMain, skipBattle,
     summonAvatar, buildConstruct, playMagic, checkPay, payCost, gemLimitFor, validateGem,
     declareAttack, redirectLomu, resolveBattle, canAttackLife, cantTarget,
     destroyInst, exileInst, bounceInst, deckReturnInst, summonFromZone,
