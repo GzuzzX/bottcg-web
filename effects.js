@@ -887,6 +887,8 @@
   function execActivated(st, meIdx, instUid, abId, picks) {
     picks = picks || {};
     if (E.responsePending && E.responsePending(st)) return { ok: false, error: 'รอการตัดสินใจสวนก่อน' };
+    // R23 (p.22): voluntary abilities wait until every due LIFE has resolved.
+    if (st._lifeResolving) return { ok: false, error: 'รอผล LIFE ต้น Main ครบทุกใบก่อน' };
     const inst = findInst(st, instUid);
     if (!inst) return { ok: false, error: 'ไม่เจอการ์ด' };
     const sc = scriptOf(inst);
@@ -1180,13 +1182,20 @@
     });
     return true;
   }
-  function onLifeFlipped(st, pIdx, lifeEntry) {
+  function onLifeFlipped(st, pIdx, lifeEntry, info) {
     const sup = st.lifeSuppress;
     if (sup && sup.owner !== pIdx && (st.turn * 2 + st.cur) <= sup.until) {
       E.slog(st, 'LIFE ' + lifeEntry.card.db.name + ' ถูกหงายแต่ความสามารถไม่ทำงาน');
       return true;
     }
-    E.addDelayed(st, pIdx, 'LIFE ' + lifeEntry.card.db.name + ' (ออกผล Main ถัดไป)', { print: lifeEntry.card.db.print, name: lifeEntry.card.db.name, isLife: true });
+    // R23: record reveal batch + original LIFE index + reveal order.
+    const p = st.players[pIdx];
+    const seq = (st._lifeRevealSeq = (st._lifeRevealSeq || 0) + 1);
+    const lifeIndex = (info && info.lifeIndex !== undefined && info.lifeIndex !== null)
+      ? info.lifeIndex : p.life.indexOf(lifeEntry);
+    const batchId = (info && info.batchId !== undefined && info.batchId !== null)
+      ? info.batchId : ('solo-' + seq);
+    E.addDelayed(st, pIdx, 'LIFE ' + lifeEntry.card.db.name + ' (ออกผล Main ถัดไป)', { print: lifeEntry.card.db.print, name: lifeEntry.card.db.name, isLife: true, lifeIndex, batchId, seq });
     return true;
   }
   // continuous (Land included; both-side auras via match)

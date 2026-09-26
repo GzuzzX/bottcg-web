@@ -114,20 +114,58 @@
     return false;
   }
 
-  // ---------- deck validation (p27 rulebook Deck Set) ----------
-  function validateDecks(main, life) {
+  // ---------- deck validation (Rulebook 3.2 pp.1,5,14 — R31) ----------
+  // format: 'casual' (default) | 'tournament' (must be chosen explicitly).
+  // Common to both: Main exactly 50, LIFE 5 with unique names,
+  // normally exactly one Only #1, same-name limit 4 counting reprints.
+  // ลำเอียง: legal in casual, illegal in tournament.
+  // 50-copy exception (p.5): all 50 share ONE allowlisted 50-copy identity
+  // and the deck has zero Only #1 — never granted by regex alone.
+  // Allowlist below is curated from cards.json candidates (decisions doc);
+  // cross-print image identity is still unverified, so the exception
+  // conservatively requires a single uniform PRINT as well (documented
+  // limitation — relax only after image/identity verification).
+  const SPECIAL_50_NAMES = ['รัททาทุย', 'รัททาทุย พาหะ', 'เอเจ้นท์สมูท'];
+  function isLamEiang(c) {
+    return /ลำเอียง/.test(c.ex || '') || /ลำเอียง/.test(c.hashtagText || '') || /ลำเอียง/.test(c.name || '');
+  }
+  function special50Info(main) {
+    if (!main.length) return null;
+    const name0 = main[0].name;
+    if (SPECIAL_50_NAMES.indexOf(name0) < 0) return null;
+    for (const c of main) {
+      if (c.name !== name0) return null;
+      if ((c.print || '') !== (main[0].print || '')) return null;
+    }
+    return { name: name0, print: main[0].print };
+  }
+  function validateDecks(main, life, opts) {
+    main = main || []; life = life || [];
+    var format = (opts && opts.format) || 'casual';
     const errs = [];
+    if (format !== 'casual' && format !== 'tournament') {
+      errs.push('format ไม่ถูกต้อง (ต้องเป็น casual หรือ tournament)');
+      format = 'casual';
+    }
     if (main.length !== 50) errs.push('Main ต้อง 50 ใบพอดี (ตอนนี้ ' + main.length + ')');
     const onlys = main.filter(c => c.ex && /only/i.test(c.ex));
-    if (onlys.length !== 1) errs.push('ต้องมี Only #1 1 ใบ (ตอนนี้ ' + onlys.length + ')');
+    const special = (main.length === 50) ? special50Info(main) : null;
+    if (special) {
+      if (onlys.length) errs.push('เด็คพิเศษ 50 ใบ (' + special.name + ') ต้องไม่มี Only #1');
+    } else if (onlys.length !== 1) {
+      errs.push('ต้องมี Only #1 1 ใบ (ตอนนี้ ' + onlys.length + ')');
+    }
     const banned = main.filter(c => isBanned(c.print));
     if (banned.length) errs.push('มีการ์ด Banned: ' + banned.map(c => c.name + ' (' + c.print + ')').join(', '));
     const bannedLife = life.filter(c => isBanned(c.print));
     if (bannedLife.length) errs.push('LIFE มีการ์ด Banned: ' + bannedLife.map(c => c.name + ' (' + c.print + ')').join(', '));
-    if (main.some(c => /ลำเอียง/.test(c.hashtagText || '') || /ลำเอียง/.test(c.name || ''))) errs.push('มีการ์ดลำเอียง ห้ามแข่ง');
+    // ลำเอียง (p.1/p.5): casual ใส่ได้, tournament ห้าม.
+    if (format === 'tournament' && main.some(isLamEiang)) errs.push('มีการ์ดลำเอียง ห้ามแข่ง');
     const cnt = {};
     main.forEach(c => { cnt[c.name] = (cnt[c.name] || 0) + 1; });
     for (const n of Object.keys(cnt)) {
+      // 50-copy identity is exempt from the 4-copy name limit by rule.
+      if (special && n === special.name) continue;
       const s = main.find(c => c.name === n);
       const lim = s.customLimit || 4;
       if (cnt[n] > lim) errs.push(n + ' เกินลิมิต (' + cnt[n] + '/' + lim + ')');
@@ -343,7 +381,8 @@
     }
     const gems = payList.slice();
     for (const c of gems) {
-      if (c.db.name === payTargetName) return { ok: false, error: 'ห้ามใช้การ์ดชื่อเดียวกันจ่าย Cost ให้กันและกัน' };
+      // R30 (p.6-7,17,14): no blanket ban on paying with a same-named card.
+      // Name-based payment limits live only in per-card text (gemLimitFor/scripts).
       const gc = c.db.gemColor || '';
       if (!isMagic && gc && needColor && gc !== needColor) return { ok: false, error: 'GEM สีไม่ตรง (' + gc + ' ต้องการ ' + needColor + ')' };
       const lim = gemLimitFor(c.db);
@@ -727,12 +766,15 @@
   function flipLifeAt(st, pIdx, count, faceUp, cause) {
     const p = st.players[pIdx];
     const allowQueue = (cause === 'attack' || cause === 'damage');
+    // R23 (p.5): one flipLifeAt call = one simultaneous-reveal batch.
+    const batchId = (st._lifeBatchSeq = (st._lifeBatchSeq || 0) + 1);
     let n = 0;
-    for (const l of p.life) {
+    for (let li = 0; li < p.life.length; li++) {
+      const l = p.life[li];
       if (n >= count) break;
       if (faceUp && !l.open) {
         l.open = true; n++;
-        if (allowQueue) fx('onLifeFlipped', st, pIdx, l);
+        if (allowQueue) fx('onLifeFlipped', st, pIdx, l, { batchId, lifeIndex: li });
         else slog(st, 'หงาย LIFE ' + l.card.db.name + ' (เอฟเฟค — ไม่สั่ง ability)');
       }
       else if (!faceUp && l.open && !p.sahat) { l.open = false; n++; }
@@ -769,17 +811,34 @@
     st.delayed = st.delayed || [];
     // R22: only due immediates run at next Main. Scheduled countdowns
     // (data.wait) stay queued until tickDelayed fires them.
-    let due = st.delayed.filter(d => d.owner === ownerIdx && !(d.data && d.data.wait));
-    let lifeResolved = false;
-    due = due.filter(d => {
-      if (d.data && d.data.isLife) {
-        if (lifeResolved) return false;
-        lifeResolved = true;
-      }
-      return true;
+    const due = st.delayed.filter(d => d.owner === ownerIdx && !(d.data && d.data.wait));
+    // R23 (p.5/p.22): EVERY due LIFE resolves at Main start — no one-per-Main cap.
+    // Same reveal batch ordered top LIFE index → bottom; separate reveal events
+    // are never merged (batches keep reveal order).
+    const lifes = due.filter(d => d.data && d.data.isLife);
+    const batchOrder = {};
+    lifes.forEach(d => {
+      const b = (d.data && d.data.batchId !== undefined && d.data.batchId !== null) ? d.data.batchId : '@solo';
+      const s = (d.data && d.data.seq) || 0;
+      if (!(b in batchOrder)) batchOrder[b] = s;
+      else batchOrder[b] = Math.min(batchOrder[b], s);
     });
+    lifes.sort((a, b) => {
+      const ba = (a.data && a.data.batchId !== undefined && a.data.batchId !== null) ? a.data.batchId : '@solo';
+      const bb = (b.data && b.data.batchId !== undefined && b.data.batchId !== null) ? b.data.batchId : '@solo';
+      if (ba !== bb) return (batchOrder[ba] || 0) - (batchOrder[bb] || 0);
+      return ((a.data && a.data.lifeIndex) || 0) - ((b.data && b.data.lifeIndex) || 0);
+    });
+    const others = due.filter(d => !(d.data && d.data.isLife));
+    const ordered = lifes.concat(others);
     st.delayed = st.delayed.filter(d => !due.includes(d));
-    due.forEach(d => fx('onDelayed', st, ownerIdx, d));
+    // R23 (p.22): no normal React may slip in before every due LIFE has resolved.
+    if (lifes.length) st._lifeResolving = true;
+    try {
+      ordered.forEach(d => fx('onDelayed', st, ownerIdx, d));
+    } finally {
+      delete st._lifeResolving;
+    }
     if (!due.length) return;
     if (st.delayed.length || due.some(d => d.unresolved)) {
       due.forEach(d => { if (d.unresolved) st.pendingOps.push({ kind: 'manual', text: d.desc, src: null }); });
@@ -817,6 +876,8 @@
     opts = opts || {};
     const p = st.players[pIdx];
     if (isGameOver(st)) return { ok: false, error: 'เกมจบแล้ว' };
+    // R23 (p.22): voluntary plays wait until every due LIFE has resolved.
+    if (st._lifeResolving) return { ok: false, error: 'รอผล LIFE ต้น Main ครบทุกใบก่อน' };
     const blk = blockIfPending(st);
     if (blk) return blk;
     const card = p.hand.find(c => c.uid === handUid);
@@ -1232,7 +1293,7 @@
 
   return {
     isGameOver, checkDeckZero,
-    setSeed, rng, newGame, submitRPS, mulligan, validateDecks, isBanned, doDrawPhase, drawOne, nextPhase, enterMain, skipBattle,
+    setSeed, rng, newGame, submitRPS, mulligan, validateDecks, isBanned, SPECIAL_50_NAMES, doDrawPhase, drawOne, nextPhase, enterMain, skipBattle,
     pendingDiscard, resolveDiscard,
     summonAvatar, buildConstruct, playMagic, checkPay, payCost, gemLimitFor, validateGem,
     declareAttack, redirectPartner, resolveBattle, canAttackLife, cantTarget,
