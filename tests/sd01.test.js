@@ -10,16 +10,15 @@ test('SD01-018 invalid draws nothing and consumes nothing', () => {
   st.players[0].main = [H.mkInst(H.mkDb({ name: 'D' }), 0)];
   const row = H.rowFor('SD01-018');
   const m = H.mkInst(row, 0);
-  // need GEM 1 + เทพ Avatar discard: give no valid discard
-  const gem = H.mkInst(H.gemCard('G', 1), 0);
+  // R01: no GEM — only the text cost (discard เทพ Avatar). Non-tep fails.
   const nonTep = H.mkInst(H.mkDb({ name: 'X', type: 'Avatar', symbol: 'ยักษ์' }), 0);
-  H.giveHand(st, 0, [m, gem, nonTep]);
+  H.giveHand(st, 0, [m, nonTep]);
   const before = H.snapshot(st);
-  const r = E.playMagic(st, 0, m.uid, { payUids: [gem.uid], discardUids: [nonTep.uid] });
+  const r = E.playMagic(st, 0, m.uid, { discardUids: [nonTep.uid] });
   assert.equal(r.ok, false);
   assert.equal(H.snapshot(st), before);
   // also missing discard fails
-  const r2 = E.playMagic(st, 0, m.uid, { payUids: [gem.uid], discardUids: [] });
+  const r2 = E.playMagic(st, 0, m.uid, {});
   assert.equal(r2.ok, false);
   assert.equal(H.snapshot(st), before);
 });
@@ -31,14 +30,12 @@ test('SD01-018 valid pays once and draws 2', () => {
   st.players[0].main = [H.mkInst(H.mkDb({ name: 'D1' }), 0), H.mkInst(H.mkDb({ name: 'D2' }), 0), H.mkInst(H.mkDb({ name: 'D3' }), 0)];
   const row = H.rowFor('SD01-018');
   const m = H.mkInst(row, 0);
-  const gem = H.mkInst(H.gemCard('G', 1), 0);
   const tep = H.mkInst(H.mkDb({ name: 'Tep', type: 'Avatar', symbol: 'เทพ' }), 0);
-  H.giveHand(st, 0, [m, gem, tep]);
-  const r = E.playMagic(st, 0, m.uid, { payUids: [gem.uid], discardUids: [tep.uid] });
+  H.giveHand(st, 0, [m, tep]);
+  const r = E.playMagic(st, 0, m.uid, { discardUids: [tep.uid] });
   assert.equal(r.ok, true);
-  // drew 2 (main 3->1, hand: start 3, -gem -tep -m +2 = 1? let's check: hand 3 (m,gem,tep) -> after pay gem->hell, tep->hell, m->hell, draw 2 -> hand 2
+  // hand 2 (m,tep) -> after tep->hell, m->hell, draw 2 -> hand 2
   assert.equal(st.players[0].hand.length, 2);
-  assert.ok(st.players[0].hell.find(c => c.uid === gem.uid));
   assert.ok(st.players[0].hell.find(c => c.uid === tep.uid));
 });
 
@@ -46,6 +43,7 @@ test('SD01-002 gains exactly +2 per qualifying attack until turn end', () => {
   const { E, FX } = H.loadAll();
   FX.setHumanSides([]);
   const st = H.newEmptyGame(E);
+  st.phase = 'battle'; // R12: attacks only in Battle Phase
   const row = H.rowFor('SD01-002');
   const atk = H.mkInst(row, 0);
   H.giveAvatar(st, 0, [atk]);
@@ -71,16 +69,14 @@ test('SD01-020 affects both sides and stops when removed', () => {
   const st = H.newEmptyGame(E);
   const row = H.rowFor('SD01-020');
   const land = H.mkInst(row, 0);
-  // need GEM 2 for Land
-  const g1 = H.mkInst(H.gemCard('G1', 1), 0);
-  const g2 = H.mkInst(H.gemCard('G2', 1), 0);
-  H.giveHand(st, 0, [land, g1, g2]);
+  // R01: Land costs no GEM — plays free.
+  H.giveHand(st, 0, [land]);
   const mine = H.mkInst(H.mkDb({ name: 'M', type: 'Avatar', power: 1, symbol: 'เทพ' }), 0);
   const foe = H.mkInst(H.mkDb({ name: 'F', type: 'Avatar', power: 1, symbol: 'เทพ' }), 1);
   const foeNon = H.mkInst(H.mkDb({ name: 'FN', type: 'Avatar', power: 1, symbol: 'ยักษ์' }), 1);
   H.giveAvatar(st, 0, [mine]);
   H.giveAvatar(st, 1, [foe, foeNon]);
-  const r = E.playMagic(st, 0, land.uid, { payUids: [g1.uid, g2.uid] });
+  const r = E.playMagic(st, 0, land.uid, {});
   assert.equal(r.ok, true);
   assert.equal(E.effPower(mine, 0, st), 2);
   assert.equal(E.effPower(foe, 0, st), 2);
@@ -132,9 +128,8 @@ test('SD01-017 targets summoned Avatar', () => {
   H.giveHand(st, 0, [weak]);
   const row17 = H.rowFor('SD01-017');
   const react = H.mkInst(row17, 1);
-  // need GEM 1 for React
-  const gem = H.mkInst(H.gemCard('G', 1), 0);
-  H.giveHand(st, 1, [react, gem]);
+  // R01: React costs no GEM.
+  H.giveHand(st, 1, [react]);
   // P0 summons weak; P1 auto-responds with 017 (bot) should destroy weak, not strong
   // ensure P1 has GEM auto? doResponse auto-selects GEM via autoGemUids
   const r = E.summonAvatar(st, 0, weak.uid, []);

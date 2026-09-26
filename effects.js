@@ -130,11 +130,21 @@
     return found.slice(0, n || 1);
   }
   // target resolution: explicit pick, else auto (foe picks from foe's view when op.foePicks)
+  // R27: an explicit UID outside the script's eligible set is REJECTED (no cross-side steal).
   function pickTarget(st, meIdx, op, picks, purpose) {
-    const u = picks[op.pick || 'targetUid'] ||
-      (op.foePicks ? autoPick(st, 1 - meIdx, op.spec, purpose) : autoPick(st, meIdx, op.spec, purpose));
+    const spec = op.spec || null;
+    const explicitKey = op.pick || 'targetUid';
+    const hasExplicit = picks && picks[explicitKey] !== undefined && picks[explicitKey] !== null;
+    const u = hasExplicit ? picks[explicitKey]
+      : (op.foePicks ? autoPick(st, 1 - meIdx, spec, purpose) : autoPick(st, meIdx, spec, purpose));
     const t = u ? findInst(st, u) : null;
-    if (t && abilityUntargetable(st, meIdx, t)) {
+    if (!t) return null;
+    if (spec && listTargets(st, meIdx, spec).indexOf(t) < 0) {
+      E.slog(st, (t.db.name || '?') + ' ไม่ใช่เป้าหมายที่ถูกต้องตามข้อความ');
+      return null;
+    }
+    if (!E.onField(st, t)) return null;
+    if (abilityUntargetable(st, meIdx, t)) {
       E.slog(st, t.db.name + ' ไม่ตกเป็นเป้า (เอฟเฟคป้องกัน)');
       return null;
     }
@@ -372,7 +382,7 @@
   function runOps(st, meIdx, src, ops, picks) {
     picks = picks || {};
     for (const op of ops) {
-      if (st.winner) break;
+      if (E.isGameOver ? E.isGameOver(st) : (st.winner !== null && st.winner !== undefined)) break;
       if (op.when && !op.when(st, meIdx, src, picks)) continue;
       if (op.requireHell) {
         const n = st.players[meIdx].hell.filter(c => (c.db.name || '').includes(op.requireHell.name)).length;
@@ -503,7 +513,12 @@
               E.summonFromZone(st, meIdx, c, { juti: true });
             }
           });
-          if (op.shuffleAfter && op.where === 'deckMine') E.shuffle(st.players[meIdx].main);
+          if (op.where === 'deckMine' || op.where === 'deckFoe') E.shuffle(st.players[op.where === 'deckMine' ? meIdx : 1 - meIdx].main);
+          // R05: search from deck can empty it — check immediately.
+          if (op.where === 'deckMine' || op.where === 'deckFoe') {
+            const dp = st.players[op.where === 'deckMine' ? meIdx : 1 - meIdx];
+            if (dp.main.length === 0) E.checkDeckZero(st);
+          }
           break;
         }
         case 'scry': {
@@ -532,14 +547,18 @@
           else if (rest === 'deckTop') left.reverse().forEach(c => p.main.unshift(c));
           else left.forEach(c => p.main.unshift(c));
           if (rest === 'deckShuffle') E.shuffle(p.main);
+          // R05: scry peeks/removes from deck — empty deck loses at once.
+          if (p.main.length === 0) E.checkDeckZero(st);
           break;
         }
         case 'millHell': {
           const p = st.players[op.side === 'foe' ? 1 - meIdx : meIdx];
+          if (!p._deckLive && p.main.length > 0) p._deckLive = true;
           const milled = [];
           for (let i = 0; i < op.n && p.main.length; i++) milled.push(p.main.shift());
           milled.forEach(c => p.hell.push(c));
           E.slog(st, src.db.name + ' ธรณีสูบ ' + op.n);
+          if (p.main.length === 0 && milled.length) E.checkDeckZero(st);
           milled.forEach(c => {
             if (c.db.type === 'Avatar') runTriggered(st, p.idx, c, 'onMill', { by: src });
           });
@@ -669,7 +688,8 @@
           break;
         }
         case 'flipLife': {
-          E.flipLifeAt(st, op.side === 'foe' ? 1 - meIdx : meIdx, op.n || 1, op.up !== false);
+          // R21: effect-caused flips never queue LIFE abilities.
+          E.flipLifeAt(st, op.side === 'foe' ? 1 - meIdx : meIdx, op.n || 1, op.up !== false, 'effect');
           break;
         }
         case 'flipLifeRandom': {
@@ -768,7 +788,10 @@
         }
         case 'gainControl': {
           const t = pickTarget(st, meIdx, op, picks, 'destroy');
-          if (t && E.onField(st, t)) E.gainControl(st, t, meIdx);
+          if (t && E.onField(st, t)) {
+            const r = E.gainControl(st, t, meIdx);
+            if (r && r.ok === false) E.slog(st, 'เปลี่ยนควบคุมไม่ได้: ' + r.error);
+          }
           break;
         }
         case 'moveToMagic': {
@@ -804,18 +827,56 @@
     return k;
   }
   function canUse(st, meIdx, inst, ab) {
-    if (st.winner) return false;
+    if (E.isGameOver ? E.isGameOver(st) : (st.winner !== null && st.winner !== undefined)) return false;
     if (ab.location === 'hand' && st.players[meIdx].hand.indexOf(inst) < 0) return false;
     if (ab.location === 'hell' && st.players[meIdx].hell.indexOf(inst) < 0) return false;
-    if (!ab.location && !E.onField(st, inst)) return false;
-    if (E.silenced && E.silenced(inst, st) && !ab.ruleText) return false;
-    if ((ab.oncePerTurn || ab.perBattle) && inst.fxUsed[ab.id] === usedKey(st, ab)) return false;
-    if (ab.phases && ab.phases.indexOf(st.phase) < 0) return false;
-    if (ab.turn && ((ab.turn === 'mine' && st.cur !== meIdx) || (ab.turn === 'foe' && st.cur === meIdx))) return false;
+    // R24: คำสั่งเสีย triggers from the event snapshot — the source is already in hell.
+    const isDeathTrigger = ab.kind === 'triggered' && ab.trigger === 'commandDeath';
+    if (!ab.location && !isDeathTrigger && !E.onField(st, inst)) return false;
+    if (E.silenced && E.silenced(inst, st) && !ab.ruleText && !isDeathTrigger) return false;
+    if ((ab.oncePerTurn || ab.perBattle) && inst.fxUsed[ab.id] === usedKey(st, ab, inst)) return false;
+    // R29: default activated timing is own Main on empty stack — scripts opt OUT explicitly.
+    if (ab.kind === 'activated') {
+      const phases = ab.phases || ['main'];
+      if (phases.indexOf(st.phase) < 0) return false;
+      const turn = ab.turn || 'mine';
+      if ((turn === 'mine' && st.cur !== meIdx) || (turn === 'foe' && st.cur === meIdx)) return false;
+    } else {
+      if (ab.phases && ab.phases.indexOf(st.phase) < 0) return false;
+      if (ab.turn && ((ab.turn === 'mine' && st.cur !== meIdx) || (ab.turn === 'foe' && st.cur === meIdx))) return false;
+    }
     return true;
   }
   function markUsed(st, inst, ab) {
     if (ab.oncePerTurn || ab.perBattle || ab.perSummon) inst.fxUsed[ab.id] = usedKey(st, ab, inst);
+  }
+  // R28: mutation-free preflight — every op branch must be legal before cost.
+  // Optional ("ได้"/choice) branches are skipped; mandatory empty targets fail.
+  function effectPossible(st, meIdx, src, ops, picks) {
+    picks = picks || {};
+    for (const op of (ops || [])) {
+      if (op.when && !op.when(st, meIdx, src, picks)) continue;
+      if (op.op === 'destroy' || op.op === 'bounce' || op.op === 'exile' || op.op === 'silence' ||
+          op.op === 'buff' || op.op === 'gainControl' || op.op === 'moveToMagic') {
+        if (op.optional) continue;
+        const key = op.pick || 'targetUid';
+        if (picks[key] !== undefined) {
+          const t = findInst(st, picks[key]);
+          if (!t) return { ok: false, error: 'เป้าหมายไม่ถูกต้อง' };
+          if (op.spec && listTargets(st, meIdx, op.spec).indexOf(t) < 0) return { ok: false, error: 'เป้าหมายไม่ตรงเงื่อนไข' };
+          if ((op.op === 'destroy' || op.op === 'bounce' || op.op === 'exile') && !E.onField(st, t)) return { ok: false, error: 'เป้าหมายไม่อยู่บนสนาม' };
+        } else {
+          const cands = op.spec ? listTargets(st, meIdx, op.spec).filter(c => E.onField(st, c)) : null;
+          // ops without spec (event-bound destroy like อุบัติเหตุ) resolve at runtime — skip.
+          if (cands !== null && !cands.length) return { ok: false, error: 'ไม่มีเป้าหมายให้ทำ effect' };
+        }
+      } else if (op.op === 'search' || op.op === 'summonFrom') {
+        if (op.optional) continue;
+        const found = zoneSearch(st, meIdx, op.where, op.filter, op.n || 1);
+        if (!found.length) return { ok: false, error: 'ไม่มีการ์ดให้ค้น/อัญเชิญ' };
+      }
+    }
+    return { ok: true };
   }
   // activated abilities available for UI listing
   function listActivated(st, meIdx, inst) {
@@ -843,6 +904,9 @@
         ops = (def && def.ops) || [];
       }
     }
+    // R28 (p.13): all of the effect must be possible BEFORE any cost is paid.
+    const pre = effectPossible(st, meIdx, inst, ops, picks);
+    if (!pre.ok) return pre;
     // atomic validation first (failed attempts do not mark/count)
     const v = validateCostAb(st, meIdx, inst, ab.cost || {}, picks);
     if (!v.ok) return v;
@@ -880,7 +944,7 @@
       if (ab.cond && !ab.cond(st, meIdx, inst, ctx)) return;
       if (ab.condData) {
         const cd = ab.condData;
-        if (cd.podi && !inst._podi) return;
+        if (cd.podi !== false && ab.trigger === 'juti' && !inst._podi) return;
           if (cd.byCost && !(ctx && ctx.byCost === true)) return;
         if (cd.byEffect && !(ctx && ctx.byCost === false)) return;
         if (cd.fromZone && !(ctx && ctx.fromZone === cd.fromZone)) return;
@@ -1122,7 +1186,7 @@
       E.slog(st, 'LIFE ' + lifeEntry.card.db.name + ' ถูกหงายแต่ความสามารถไม่ทำงาน');
       return true;
     }
-    E.addDelayed(st, pIdx, 'LIFE ' + lifeEntry.card.db.name + ' (ออกผล Main ถัดไป)', { print: lifeEntry.card.db.print, name: lifeEntry.card.db.name });
+    E.addDelayed(st, pIdx, 'LIFE ' + lifeEntry.card.db.name + ' (ออกผล Main ถัดไป)', { print: lifeEntry.card.db.print, name: lifeEntry.card.db.name, isLife: true });
     return true;
   }
   // continuous (Land included; both-side auras via match)
@@ -1389,7 +1453,7 @@
   // Shared validation for React legality+payment+limits (mutation-free). Used by doResponse + resolveQueued + direct plays.
   function validateReact(st, me, inst, ab, ev, picks, payUids) {
     picks = picks || {};
-    if (st.winner) return { ok: false, error: 'เกมจบแล้ว' };
+    if (E.isGameOver ? E.isGameOver(st) : (st.winner !== null && st.winner !== undefined)) return { ok: false, error: 'เกมจบแล้ว' };
     if (!canUseResponse(st, me, inst, ab, ev)) return { ok: false, error: 'สวนไม่ได้ตอนนี้' };
     // React locks
     if (inst.db.type === 'Magic') {
@@ -1402,23 +1466,12 @@
       const ign = ignoreMagicLimit(st, me, inst) === true;
       const eff = effectiveReactSub(st, me, inst);
       if (!ign && (st.players[me].magicUsed[eff] || 0) >= 1) return { ok: false, error: 'ใช้ ' + eff + ' ไปแล้ว' };
-      // GEM costs (Normal/React/Modification/Land as React)
-      const need = inst.db.cost || 0;
+      // R01: Magic has no GEM cost field — only text costs (ab.cost) apply.
+      // Stray GEM picks from old UI are rejected so nothing is double-paid.
       let pu = payUids;
       if (pu === undefined) pu = picks.payUids;
-      if (pu === undefined && need > 0) {
-        // bot auto-select
-        pu = autoGemUids(st, me, inst);
-        if (pu === null) return { ok: false, error: 'GEM ไม่พอ' };
-        picks.payUids = pu;
-      }
       pu = pu || [];
-      if (pu.indexOf(inst.uid) >= 0) return { ok: false, error: 'ใช้การ์ดตัวเองจ่ายไม่ได้' };
-      if (new Set(pu).size !== pu.length) return { ok: false, error: 'เลือก GEM ซ้ำ' };
-      const plist = pu.map(u => st.players[me].hand.find(c => c.uid === u));
-      if (plist.some(c => !c)) return { ok: false, error: 'GEM stale' };
-      const chk = E.checkPay(st, st.players[me], need, inst.db.color || '', plist, inst.db.name, inst.uid);
-      if (!chk.ok) return chk;
+      if (pu.length) return { ok: false, error: 'เวทมนตร์ใบนี้ไม่ต้องทิ้งจ่าย GEM (จ่ายเฉพาะ cost ในข้อความ)' };
     }
     if (ab.cost && Object.keys(ab.cost).length) {
       // auto-fill destroyEquipped for bot if missing
@@ -1434,6 +1487,11 @@
     return { ok: true };
   }
   function commitReactGem(st, me, inst, payUids) {
+    // R01: Magic never pays GEM — keep as no-op for legacy callers.
+    if (inst && inst.db && inst.db.type === 'Magic') {
+      if (payUids && payUids.length) return { ok: false, error: 'เวทมนตร์ใบนี้ไม่ต้องทิ้งจ่าย GEM' };
+      return { ok: true };
+    }
     const need = inst.db.cost || 0;
     if (!need && !(payUids && payUids.length)) return { ok: true };
     const p = st.players[me];
@@ -1525,7 +1583,13 @@
       st._pendingEv = st._evStack.length ? st._evStack[st._evStack.length - 1] : null;
     }
     // after resuming, the completed effect may have emitted new events with their own pending; leave them
-    return { resumed: true, pending: !!((st.pendingResponses || []).length) };
+    let pending = !!((st.pendingResponses || []).length);
+    if (!pending && st._evStack && st._evStack.length) {
+      // Drain stack by order
+      const res = resumeIfDone(st, st._evStack[st._evStack.length - 1].id);
+      pending = res.pending;
+    }
+    return { resumed: true, pending };
   }
   // UI calls after resolving/passing a queued response (preserves queue on validation failure)
   function resolveQueued(st, key, use, picks) {
@@ -1695,7 +1759,7 @@
     return false;
   }
   function canUseResponse(st, me, inst, ab, ev) {
-    if (st.winner) return false;
+    if (E.isGameOver ? E.isGameOver(st) : (st.winner !== null && st.winner !== undefined)) return false;
     if (st.noReactMagic && st.noReactMagic.owner === me && (st.turn * 2 + st.cur) <= st.noReactMagic.until) {
       if (inst.db.type === 'Magic') return false;
     }
@@ -1712,38 +1776,19 @@
     return true;
   }
   function doResponse(st, prevEv, r) {
-    // Unified path: same validation/commitment/limits as human (resolveQueued). Bot auto-selects GEM + picks.
+    // Unified path: same validation/commitment/limits as human (resolveQueued). Bot auto-selects picks.
+    // R01: Magic Reacts cost no GEM — only text costs (ab.cost) apply.
     const p = st.players[r.me];
     const picks = Object.assign(autoPicksFor(st, r.me, r.ab), { ev: prevEv });
-    // auto GEM for bot
-    let payUids = null;
-    if (r.fromHand && r.inst.db.type === 'Magic' && (r.inst.db.cost || 0) > 0) {
-      payUids = autoGemUids(st, r.me, r.inst);
-      if (payUids === null) { E.slog(st, r.inst.db.name + ' GEM ไม่พอ สวนไม่ได้'); return { ok: false }; }
-      picks.payUids = payUids;
-    }
-    const v = validateReact(st, r.me, r.inst, r.ab, prevEv, picks, payUids === null ? [] : payUids);
+    let payUids = [];
+    const v = validateReact(st, r.me, r.inst, r.ab, prevEv, picks, payUids);
     if (!v.ok) { E.slog(st, r.inst.db.name + ' สวนไม่ได้: ' + v.error); return { ok: false, error: v.error }; }
-    // commitment (limits first, then GEM, then ability cost) — exceeded limits consume nothing (validated above)
+    // commitment (limits first, then ability cost) — exceeded limits consume nothing (validated above)
     let effSub = null, ign = false;
     if (r.fromHand && r.inst.db.type === 'Magic') {
       effSub = effectiveReactSub(st, r.me, r.inst);
       ign = ignoreMagicLimit(st, r.me, r.inst) === true;
       if (!ign) p.magicUsed[effSub] = (p.magicUsed[effSub] || 0) + 1;
-      if (payUids && payUids.length) {
-        const cg = commitReactGem(st, r.me, r.inst, payUids);
-        if (!cg.ok) {
-          if (!ign) p.magicUsed[effSub] = Math.max(0, (p.magicUsed[effSub] || 1) - 1);
-          return { ok: false, error: cg.error };
-        }
-      } else if ((r.inst.db.cost || 0) > 0) {
-        // zero-length but cost>0 should have been caught; be safe
-        const cg = commitReactGem(st, r.me, r.inst, []);
-        if (!cg.ok) {
-          if (!ign) p.magicUsed[effSub] = Math.max(0, (p.magicUsed[effSub] || 1) - 1);
-          return { ok: false, error: cg.error };
-        }
-      }
       const hi = p.hand.indexOf(r.inst);
       if (hi < 0) {
         if (!ign) p.magicUsed[effSub] = Math.max(0, (p.magicUsed[effSub] || 1) - 1);
@@ -1803,6 +1848,6 @@
     onMagicResolve, onEvent,
     onMainStart, onEndStart, onDrawEnd, onBattleStart, onDelayed, onLifeFlipped, ignoreMagicLimit, usableAsReact,
       powerAura, powerSelf, equipBonusExtra, equipBonusOverride, untargetable, gemLimitFor, equipGrants, costBanHit, attackBan,
-      summonBan, setCardDB, destroyProtected, magicExtraCost, validateAbCost, commitAbCost, hasOnAttackScript,
+      summonBan, setCardDB, destroyProtected, magicExtraCost, collectCostUids, validateAbCost, commitAbCost, hasOnAttackScript,
   };
 });

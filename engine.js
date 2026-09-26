@@ -36,6 +36,21 @@
       grantedKw: [],
     };
   }
+  // R04/R35: winner=0 (P1) is a valid game-over. Never use truthiness on st.winner.
+  function isGameOver(st) { return st.winner !== null && st.winner !== undefined; }
+  function checkDeckZero(st) {
+    // R05: Main Deck 0 = lose immediately (either player). Called after any
+    // removal from main (draw/search/scry/mill). Safe on empty test setups
+    // because it only fires via explicit removal paths, not on blank state.
+    if (isGameOver(st)) return;
+    for (const p of st.players) {
+      if (p.main.length === 0 && p._deckLive) {
+        st.winner = 1 - p.idx; st.winReason = 'Deck หมด (0 ใบนับทันที)';
+        slog(st, 'P' + (p.idx + 1) + ' Deck หมด — แพ้ทันที');
+        break;
+      }
+    }
+  }
   function hasKwEff(c, kw) {
     if (!c) return false;
     if ((c.db.mainEffect || '').includes(kw)) return true;
@@ -87,7 +102,9 @@
       const a = fx('powerAura', c, st); if (typeof a === 'number') aura += a;
       const s = fx('powerSelf', c, st); if (typeof s === 'number') aura += s;
     }
-    return basePower(c) + equipBonus(c, st) + buffSum(c) + (battleExtra || 0) + (c.battleBuff || 0) + aura;
+    // R13: POWER floor 0 — never negative.
+    const v = basePower(c) + equipBonus(c, st) + buffSum(c) + (battleExtra || 0) + (c.battleBuff || 0) + aura;
+    return v < 0 ? 0 : v;
   }
   function silenced(c, st) {
     if (c.silencedUntil && st) {
@@ -122,12 +139,18 @@
 
   // ---------- game setup ----------
   function newPlayer(mainDb, lifeDb, idx) {
-    return {
+    const live = (mainDb || []).length > 0;
+    const pl = {
       idx, main: shuffle(mainDb.map(db => inst(db, idx))),
       hand: [], avatar: [], magic: [], construct: [],
       hell: [], dark: [], life: shuffle(lifeDb.map(db => ({ card: inst(db, idx), open: false }))),
       sahat: false, magicUsed: {},
     };
+    // R05 guard: only real decks (non-empty at creation) can trigger deck-zero loss.
+    // Test harnesses that build empty games set main=[] manually and stay exempt
+    // until they put cards in (drawOne/search/mill set the flag on removal).
+    pl._deckLive = live;
+    return pl;
   }
   function newGame(mainDb1, lifeDb1, mainDb2, lifeDb2) {
     UID = 1;
@@ -144,6 +167,10 @@
   }
   function submitRPS(st, pIdx, choice) {
     if (st.phase !== 'rps') return { ok: false, error: 'ไม่ใช่ช่วงเป่ายิ้งฉุบ' };
+    // R11: validate protocol input — bad side/choice must not corrupt state.
+    if (pIdx !== 0 && pIdx !== 1) return { ok: false, error: 'ฝ่ายไม่ถูกต้อง' };
+    if (choice !== 'rock' && choice !== 'paper' && choice !== 'scissors') return { ok: false, error: 'ท่าเป่ายิ้งฉุบไม่ถูกต้อง' };
+    if (st.rps[pIdx]) return { ok: false, error: 'ส่งท่าไปแล้ว' };
     st.rps[pIdx] = choice;
     
     if (st.rps[0] && st.rps[1]) {
@@ -160,6 +187,7 @@
       else if (c0 === 'paper') winner = c1 === 'rock' ? 0 : 1;
       
       st.cur = winner;
+      st._starter = winner;
       slog(st, 'เป่ายิ้งฉุบ: P' + (winner + 1) + ' ชนะได้เริ่มก่อน');
       
       for (const p of st.players) p.hand = p.main.splice(0, 5);
@@ -171,19 +199,29 @@
   }
   function mulligan(st, pIdx, returnUids) {
     if (st.phase !== 'mulligan') return { ok: false, error: 'ไม่ใช่ช่วงเปลี่ยนการ์ด' };
+    // R06/R11: strict validation — side, shape, dup, ownership.
+    if (pIdx !== 0 && pIdx !== 1) return { ok: false, error: 'ฝ่ายไม่ถูกต้อง' };
+    if (!Array.isArray(returnUids)) return { ok: false, error: 'รูปแบบการคืนไพ่ไม่ถูกต้อง' };
+    if (returnUids.length > 5) return { ok: false, error: 'คืนได้สูงสุด 5 ใบ' };
+    if (new Set(returnUids).size !== returnUids.length) return { ok: false, error: 'เลือกการ์ดซ้ำ' };
     if (st.mulliganDone[pIdx]) return { ok: false, error: 'เปลี่ยนการ์ดไปแล้ว' };
     const p = st.players[pIdx];
     const returning = [];
     for (const uid of returnUids) {
       const i = p.hand.findIndex(c => c.uid === uid);
-      if (i >= 0) returning.push(p.hand.splice(i, 1)[0]);
+      if (i < 0) return { ok: false, error: 'การ์ดไม่อยู่บนมือ (stale)' };
+      returning.push(p.hand.splice(i, 1)[0]);
     }
-    // draw same amount
+    // R06 order per PDF p.19: returned cards to BOTTOM first, draw replacements,
+    // then SHUFFLE that player's deck immediately.
+    p.main.push(...returning);
     for (let i = 0; i < returning.length; i++) {
+      if (p.main.length === 0) { checkDeckZero(st); break; }
+      p._deckLive = true;
       p.hand.push(p.main.shift());
     }
-    // put returned cards at the bottom of the deck
-    p.main.push(...returning);
+    shuffle(p.main);
+    if (p.main.length === 0) checkDeckZero(st);
     st.mulliganDone[pIdx] = true;
     slog(st, 'P' + (pIdx + 1) + ' เปลี่ยนการ์ด ' + returning.length + ' ใบ');
     
@@ -194,13 +232,28 @@
     return { ok: true };
   }
   function slog(st, t) { st.log.push('T' + st.turn + ' P' + (st.cur + 1) + ' [' + st.phase + '] ' + t); }
-  function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
+  
+  let _rngSeed = 0;
+  function setSeed(s) { _rngSeed = s; }
+  function rng() {
+    if (_rngSeed) {
+      _rngSeed = (_rngSeed * 9301 + 49297) % 233280;
+      return _rngSeed / 233280;
+    }
+    return Math.random();
+  }
+  function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
+
   function foe(st) { return st.players[1 - st.cur]; }
   function me(st) { return st.players[st.cur]; }
 
   function drawOne(st, p) {
     if (p.main.length === 0) { st.winner = 1 - p.idx; st.winReason = 'Deck หมด (0 ใบนับทันที)'; return null; }
-    const c = p.main.shift(); p.hand.push(c); return c;
+    p._deckLive = true;
+    const c = p.main.shift(); p.hand.push(c);
+    // R05: deck hits 0 AFTER the draw = lose immediately, no waiting.
+    if (p.main.length === 0) checkDeckZero(st);
+    return c;
   }
 
   // ---------- Draw Phase ----------
@@ -232,11 +285,41 @@
 
   // ---------- response gating ----------
   function responsePending(st) {
-    return !!((st.pendingResponses && st.pendingResponses.length) || (st._frames && st._frames.length));
+    return !!((st.pendingResponses && st.pendingResponses.length) || (st._frames && st._frames.length) ||
+      (st.pendingDiscards && st.pendingDiscards.length));
   }
   function blockIfPending(st) {
+    if ((st.pendingDiscards && st.pendingDiscards.length)) return { ok: false, error: 'เลือกทิ้งมือให้เหลือ 7 ก่อน' };
     if (responsePending(st)) return { ok: false, error: 'รอการตัดสินใจสวนก่อน' };
     return null;
+  }
+  // R10: End Phase hand-max is a player CHOICE, never an auto-pop.
+  function pendingDiscard(st, pIdx, count) {
+    st.pendingDiscards = st.pendingDiscards || [];
+    if (st.pendingDiscards.some(d => d.owner === pIdx)) return;
+    st.pendingDiscards.push({ owner: pIdx, count });
+    slog(st, 'P' + (pIdx + 1) + ' มือเกิน 7 — เลือกทิ้ง ' + count + ' ใบ');
+  }
+  function resolveDiscard(st, pIdx, uids) {
+    st.pendingDiscards = st.pendingDiscards || [];
+    const i = st.pendingDiscards.findIndex(d => d.owner === pIdx);
+    if (i < 0) return { ok: false, error: 'ไม่มีคิวทิ้งมือ' };
+    const q = st.pendingDiscards[i];
+    uids = (uids || []).slice();
+    if (new Set(uids).size !== uids.length) return { ok: false, error: 'เลือกการ์ดซ้ำ' };
+    if (uids.length !== q.count) return { ok: false, error: 'ต้องเลือกทิ้ง ' + q.count + ' ใบ' };
+    const p = st.players[pIdx];
+    for (const u of uids) {
+      if (p.hand.findIndex(c => c.uid === u) < 0) return { ok: false, error: 'การ์ดไม่อยู่บนมือ (stale)' };
+    }
+    uids.forEach(u => {
+      const k = p.hand.findIndex(c => c.uid === u);
+      const c = p.hand.splice(k, 1)[0];
+      p.hell.push(c);
+    });
+    st.pendingDiscards.splice(i, 1);
+    slog(st, 'P' + (pIdx + 1) + ' ทิ้งมือเหลือ 7');
+    return { ok: true };
   }
 
   // ---------- Cost payment (Avatar/Construct) ----------
@@ -309,7 +392,8 @@
   }
   function summonAvatar(st, pIdx, handUid, payUids) {
     const st2 = st, p = st.players[pIdx];
-    if (st.winner) return { ok: false, error: 'เกมจบแล้ว' };
+    if (isGameOver(st)) return { ok: false, error: 'เกมจบแล้ว' };
+    if (st.phase !== 'main' || st.cur !== pIdx) return { ok: false, error: 'อัญเชิญได้เฉพาะ Main Phase ของคุณเท่านั้น' };
     const blk = blockIfPending(st);
     if (blk) return blk;
     const card = p.hand.find(c => c.uid === handUid);
@@ -347,7 +431,8 @@
       st2._pendingEv = ev;
       return { ok: true, card, pending: true, evId: ev.id };
     }
-    if (!onField(st2, card)) { slog(st2, card.db.name + ' ออกจากสนามก่อนจุติเกิด'); return { ok: true, card }; }
+    // R25: destroy != negate — resolve triggered จุติ from the event snapshot
+    // even if a React destroyed the summoned card synchronously.
     const handled = fx('onSummoned', st2, card, { byCost: true });
     if (handled === true) return { ok: true, card };
     // Fallback simple templates (no FX): จุติ -> parse simple ops, else pending manual
@@ -366,14 +451,19 @@
 
   function resolveOps(st, ops) {
     for (const op of ops) {
+      if (isGameOver(st)) break;
       const p = st.players[op.owner !== undefined ? op.owner : st.cur];
-      if (op.kind === 'draw') { for (let i = 0; i < op.n; i++) drawOne(st, p); slog(st, (op.src ? op.src.db.name : '') + ' จั่ว ' + op.n); }
+      if (op.kind === 'draw') { for (let i = 0; i < op.n; i++) { if (isGameOver(st)) break; drawOne(st, p); } slog(st, (op.src ? op.src.db.name : '') + ' จั่ว ' + op.n); }
       else if (op.kind === 'selfBuff' && op.src) { op.src.buffs.push({ v: op.v, until: 'endTurn' }); slog(st, op.src.db.name + ' POWER ' + (op.v >= 0 ? '+' : '') + op.v); }
       else if (op.kind === 'destroyFoeAvatar') {
+        // R32: no raw splice — route through unified destruction (triggers/replacement).
         const f = st.players[1 - (op.owner !== undefined ? op.owner : st.cur)];
         for (let i = 0; i < op.n && f.avatar.length; i++) {
-          f.avatar.sort((a, b) => b.db.power - a.db.power);
-          const d = f.avatar.shift(); f.hell.push(d); slog(st, op.src.db.name + ' ทำลาย ' + d.db.name);
+          f.avatar.sort((a, b) => effPower(b, 0, st) - effPower(a, 0, st));
+          const d = f.avatar[0];
+          if (!d) break;
+          destroyInst(st, d, op.src ? op.src.db.name : 'เอฟเฟค');
+          if (isGameOver(st)) break;
         }
       }
     }
@@ -382,7 +472,8 @@
   // ---------- Construct ----------
   function buildConstruct(st, pIdx, handUid, payUids) {
     const p = st.players[pIdx];
-    if (st.winner) return { ok: false, error: 'เกมจบแล้ว' };
+    if (isGameOver(st)) return { ok: false, error: 'เกมจบแล้ว' };
+    if (st.phase !== 'main' || st.cur !== pIdx) return { ok: false, error: 'ก่อสร้างได้เฉพาะ Main Phase ของคุณเท่านั้น' };
     const blk = blockIfPending(st);
     if (blk) return blk;
     const card = p.hand.find(c => c.uid === handUid);
@@ -394,9 +485,10 @@
     if (new Set(rawPay).size !== rawPay.length) return { ok: false, error: 'เลือก GEM ซ้ำ' };
     const pays = rawPay.map(u => p.hand.find(c => c.uid === u));
     if (pays.some(c => !c)) return { ok: false, error: 'GEM ที่เลือกไม่ถูกต้อง (stale)' };
-    const preChk = checkPay(st, p, card.db.cost || 0, card.db.color || '', pays, card.db.name, handUid);
+    const effCost = typeof card.cost === 'number' ? card.cost : (card.db.cost || 0);
+    const preChk = checkPay(st, p, effCost, card.db.color || '', pays, card.db.name, handUid);
     if (!preChk.ok) return preChk;
-    const pr = payCost(st, p, card.db.cost || 0, card.db.color || '', pays, card.db.name, handUid);
+    const pr = payCost(st, p, effCost, card.db.color || '', pays, card.db.name, handUid);
     if (!pr.ok) return pr;
     p.hand.splice(p.hand.indexOf(card), 1);
     card.controller = pIdx; p.construct.push(card);
@@ -516,6 +608,11 @@
   function exileInst(st, inst, reason) {
     const owner = st.players[inst.owner];
     removeFromZones(st, inst);
+    // R20: Token leaves the game — never rests in Dark/Deck/Hand/Hell.
+    if (inst.isToken) {
+      slog(st, inst.db.name + ' (Token) ถูกเนรเทศ — หายไปจากเกม' + (reason ? ' (' + reason + ')' : ''));
+      return true;
+    }
     owner.dark.push(inst);
     slog(st, inst.db.name + ' ถูกเนรเทศ' + (reason ? ' (' + reason + ')' : ''));
     return true;
@@ -534,6 +631,11 @@
   function deckReturnInst(st, inst, toBottom, doShuffle) {
     const owner = st.players[inst.owner];
     removeFromZones(st, inst);
+    // R20: Token leaves the game — never rests in Deck.
+    if (inst.isToken) {
+      slog(st, inst.db.name + ' (Token) กลับเข้า Deck — หายไปจากเกม');
+      return true;
+    }
     if (toBottom) owner.main.push(inst);
     else owner.main.unshift(inst);
     if (doShuffle) shuffle(owner.main);
@@ -544,7 +646,7 @@
   function summonFromZone(st, pIdx, inst, opts) {
     opts = opts || {};
     const p = st.players[pIdx];
-    if (st.winner) return { ok: false, error: 'เกมจบแล้ว' };
+    if (isGameOver(st)) return { ok: false, error: 'เกมจบแล้ว' };
     if (!avatarLimitOk(p, inst)) return { ok: false, error: 'Avatar Zone เต็ม' };
     removeFromZones(st, inst);
     inst.controller = pIdx; inst.tapped = false; inst.battleBuff = 0; inst.snapshot = null;
@@ -604,20 +706,35 @@
     return { ok: true, card: equipInst };
   }
   function gainControl(st, inst, newController) {
+    // R19: change of control is NOT leaving the field. Equipment stays in its
+    // owner's Magic Zone; only the Avatar moves between controllers' lists.
+    // Enforce zone cap before committing.
+    if (inst.controller === newController) return { ok: true };
     const p = st.players[newController];
-    if (inst.controller === newController) return true;
-    removeFromZones(st, inst);
+    if (!avatarLimitOk(p, inst)) return { ok: false, error: 'Avatar Zone ฝั่งรับเต็ม' };
+    const old = st.players[inst.controller];
+    const i = old.avatar.indexOf(inst);
+    if (i < 0) return { ok: false, error: 'การ์ดไม่อยู่บนสนาม' };
+    old.avatar.splice(i, 1);
+    // Land binding follows the card, not the player — keep st.land owner in sync.
+    if (st.land && st.land.card === inst) st.land.owner = newController;
     inst.controller = newController;
     p.avatar.push(inst);
     slog(st, inst.db.name + ' เปลี่ยนการควบคุม -> P' + (newController + 1));
-    return true;
+    return { ok: true };
   }
-  function flipLifeAt(st, pIdx, count, faceUp) {
+  // R21: LIFE ability only queues when opened by attack/damage, not by bare effects.
+  function flipLifeAt(st, pIdx, count, faceUp, cause) {
     const p = st.players[pIdx];
+    const allowQueue = (cause === 'attack' || cause === 'damage');
     let n = 0;
     for (const l of p.life) {
       if (n >= count) break;
-      if (faceUp && !l.open) { l.open = true; n++; fx('onLifeFlipped', st, pIdx, l); }
+      if (faceUp && !l.open) {
+        l.open = true; n++;
+        if (allowQueue) fx('onLifeFlipped', st, pIdx, l);
+        else slog(st, 'หงาย LIFE ' + l.card.db.name + ' (เอฟเฟค — ไม่สั่ง ability)');
+      }
       else if (!faceUp && l.open && !p.sahat) { l.open = false; n++; }
     }
     if (p.life.every(l => l.open)) { p.sahat = true; slog(st, 'P' + (pIdx + 1) + ' เข้าสู่สถานะสาหัส'); }
@@ -650,8 +767,18 @@
   }
   function runDelayed(st, ownerIdx) {
     st.delayed = st.delayed || [];
-    const due = st.delayed.filter(d => d.owner === ownerIdx);
-    st.delayed = st.delayed.filter(d => d.owner !== ownerIdx);
+    // R22: only due immediates run at next Main. Scheduled countdowns
+    // (data.wait) stay queued until tickDelayed fires them.
+    let due = st.delayed.filter(d => d.owner === ownerIdx && !(d.data && d.data.wait));
+    let lifeResolved = false;
+    due = due.filter(d => {
+      if (d.data && d.data.isLife) {
+        if (lifeResolved) return false;
+        lifeResolved = true;
+      }
+      return true;
+    });
+    st.delayed = st.delayed.filter(d => !due.includes(d));
     due.forEach(d => fx('onDelayed', st, ownerIdx, d));
     if (!due.length) return;
     if (st.delayed.length || due.some(d => d.unresolved)) {
@@ -689,14 +816,14 @@
   function playMagic(st, pIdx, handUid, opts) {
     opts = opts || {};
     const p = st.players[pIdx];
-    if (st.winner) return { ok: false, error: 'เกมจบแล้ว' };
+    if (isGameOver(st)) return { ok: false, error: 'เกมจบแล้ว' };
     const blk = blockIfPending(st);
     if (blk) return blk;
     const card = p.hand.find(c => c.uid === handUid);
     if (!card || card.db.type !== 'Magic') return { ok: false, error: 'ไม่ใช่ Magic' };
     const sub = card.db.subtype || 'Normal';
     const asReact = sub !== 'React' && fx('usableAsReact', st, pIdx, card) === true;
-    if (st.phase !== 'main' && sub !== 'React' && !asReact && !opts.viaEffect) return { ok: false, error: sub + ' ใช้ได้เฉพาะ Main (React ได้ทุกช่วง)' };
+    if ((st.phase !== 'main' || st.cur !== pIdx) && sub !== 'React' && !asReact && !opts.viaEffect) return { ok: false, error: sub + ' ใช้ได้เฉพาะ Main Phase ของตัวเอง (React ได้ทุกช่วง)' };
     const ignoreLimit = fx('ignoreMagicLimit', st, pIdx, card) === true;
     const countAs = asReact ? 'React' : sub;
     if (countAs === 'React' && st.noReactMagic && st.noReactMagic.owner === pIdx && (st.turn * 2 + st.cur) <= st.noReactMagic.until) {
@@ -712,16 +839,14 @@
       if (!tc.ok) return tc;
       if (modTarget && fx('untargetable', st, pIdx, modTarget) === true) return { ok: false, error: 'เป้าหมายสวมใส่ไม่ได้' };
     }
-    // 2) GEM payment validation (all subtypes incl. Land)
-    const needCost = card.db.cost || 0;
-    const needColor = card.db.color || '';
+    // 2) R01 (Rulebook p.4/p.13): Magic has NO summon Cost field. cards.json `cost`
+    // on Magic rows is NOT a GEM payment — only the cost written before ':' in
+    // the card text (exposed via magicExtraCost, e.g. SD01-018 discard 1) may be
+    // charged. SD01-020 Land and friends play with no discard.
+    // Any stray payUids sent by old UI/tests are rejected to avoid silent double-pay.
     const rawPay = (opts.payUids || []).slice();
+    if (rawPay.length) return { ok: false, error: 'เวทมนตร์ใบนี้ไม่ต้องทิ้งจ่าย GEM (จ่ายเฉพาะ cost ในข้อความ)' };
     if (rawPay.indexOf(handUid) >= 0) return { ok: false, error: 'ใช้การ์ดตัวเองจ่ายไม่ได้' };
-    if (new Set(rawPay).size !== rawPay.length) return { ok: false, error: 'เลือก GEM ซ้ำ' };
-    const payList = rawPay.map(u => p.hand.find(c => c.uid === u));
-    if (payList.some(c => !c)) return { ok: false, error: 'GEM ที่เลือกไม่ถูกต้อง (stale)' };
-    const gemChk = checkPay(st, p, needCost, needColor, payList, card.db.name, handUid, true);
-    if (!gemChk.ok) return gemChk;
     // 3) Additional-cost picks validation (e.g. SD01-018 discard) before commitment
     let extraCost = null;
     try { extraCost = fx('magicExtraCost', st, pIdx, card); } catch (e) { extraCost = null; }
@@ -734,24 +859,13 @@
     }
     // ---- commitment phase (consume each resource exactly once) ----
     p.magicUsed[countAs] = (p.magicUsed[countAs] || 0) + 1;
-    // GEM commitment
-    if (payList.length || needCost > 0) {
-      const pr = payCost(st, p, needCost, needColor, payList, card.db.name, handUid, true);
-      if (!pr.ok) {
-        // rollback allowance (GEM failed after increment should not happen since pre-validated, but be safe)
-        p.magicUsed[countAs] = Math.max(0, (p.magicUsed[countAs] || 1) - 1);
-        return pr;
-      }
-    }
     // additional-cost commitment (mark as pre-paid so onMagicResolve does not charge twice)
     if (extraCost && Object.keys(extraCost).length) {
       let cmt = null;
       try { cmt = fx('commitAbCost', st, pIdx, card, extraCost, opts); } catch (e) { cmt = null; }
       if (cmt && !cmt.ok) {
-        // rollback: cannot easily rollback GEM, but validation should have prevented this; keep atomic by failing before moves
-        // undo magicUsed to preserve allowance on failed extra cost
+        // atomic: extra-cost failed before any move — restore allowance.
         p.magicUsed[countAs] = Math.max(0, (p.magicUsed[countAs] || 1) - 1);
-        // NOTE: GEM already consumed; validation-first should prevent reaching here. For safety, return error.
         return cmt;
       }
       card._extraPaid = true;
@@ -779,11 +893,11 @@
       if (!ev.cancelled) {
         const handled = fx('onMagicResolve', st, pIdx, card);
         if (handled !== true) {
-          // fallback simple templates
+          // fallback simple templates (draw only — destroy goes through unified path)
           const d = parseDraw(card.db.mainEffect);
-          if (d) for (let i = 0; i < d; i++) drawOne(st, p);
+          if (d) for (let i = 0; i < d; i++) { if (isGameOver(st)) break; drawOne(st, p); }
           const k = parseDestroyAvatar(card.db.mainEffect);
-          if (k) { const f = st.players[1 - pIdx]; for (let i = 0; i < k && f.avatar.length; i++) { f.avatar.sort((a, b) => b.db.power - a.db.power); const x = f.avatar.shift(); f.hell.push(x); } }
+          if (k) { const f = st.players[1 - pIdx]; for (let i = 0; i < k && f.avatar.length; i++) { f.avatar.sort((a, b) => effPower(b, 0, st) - effPower(a, 0, st)); const x = f.avatar[0]; if (!x) break; destroyInst(st, x, card.db.name); if (isGameOver(st)) break; } }
           if (!d && !k) st.pendingOps.push({ kind: 'manual', text: 'Magic ' + card.db.name + ' (บังคับเองตาม text)', src: card });
         }
       } else {
@@ -816,9 +930,9 @@
       const handled = fx('onMagicResolve', st, frame.owner, card);
       if (handled !== true) {
         const d = parseDraw(card.db.mainEffect);
-        if (d) for (let i = 0; i < d; i++) drawOne(st, p);
+        if (d) for (let i = 0; i < d; i++) { if (isGameOver(st)) break; drawOne(st, p); }
         const k = parseDestroyAvatar(card.db.mainEffect);
-        if (k) { const f = st.players[1 - frame.owner]; for (let i = 0; i < k && f.avatar.length; i++) { f.avatar.sort((a, b) => b.db.power - a.db.power); const x = f.avatar.shift(); f.hell.push(x); } }
+        if (k) { const f = st.players[1 - frame.owner]; for (let i = 0; i < k && f.avatar.length; i++) { f.avatar.sort((a, b) => effPower(b, 0, st) - effPower(a, 0, st)); const x = f.avatar[0]; if (!x) break; destroyInst(st, x, card.db.name); if (isGameOver(st)) break; } }
         if (!d && !k) st.pendingOps.push({ kind: 'manual', text: 'Magic ' + card.db.name + ' (บังคับเองตาม text)', src: card });
       }
     } else {
@@ -849,7 +963,8 @@
   function completeSummonJuti(st, frame) {
     const card = findInAll(st, frame.cardUid);
     if (!card) return false;
-    if (!onField(st, card)) { slog(st, card.db.name + ' ออกจากสนามก่อนจุติเกิด'); return true; }
+    // R25: destroy != negate. A summoned card destroyed by a React (อุบัติเหตุ)
+    // does NOT cancel its already-triggered จุติ — resolve from the event snapshot.
     const handled = fx('onSummoned', st, card, frame.byCost === false ? { byCost: false, juti: !!frame.juti } : { byCost: true });
     if (handled === true) return true;
     if (frame.byCost === false && !frame.juti) return true;
@@ -878,32 +993,55 @@
   }
   function declareAttack(st, pIdx, atkUid, supportUids, target) {
     // target: {kind:'avatar', uid} | {kind:'construct', uid} | {kind:'life'}
+    // R12: attacks only in owner's Battle Phase, once-resolving via attack identity.
+    if (isGameOver(st)) return { ok: false, error: 'เกมจบแล้ว' };
+    if (st.phase !== 'battle') return { ok: false, error: 'โจมตีได้เฉพาะ Battle Phase' };
+    if (st.cur !== pIdx) return { ok: false, error: 'ไม่ใช่เทิร์นของคุณ' };
     const blk = blockIfPending(st);
     if (blk) return blk;
     const p = st.players[pIdx], f = st.players[1 - pIdx];
     const atk = p.avatar.find(a => a.uid === atkUid);
     if (!atk || atk.tapped) return { ok: false, error: 'Avatar โจมตีไม่ได้ (tap แล้ว/ไม่อยู่)' };
-    if (silenced(atk, st)) return { ok: false, error: atk.db.name + ' ถูกใบ้ความสามารถ' };
+    // R18: silence gates abilities, not the basic attack action itself.
     const ban = fx('attackBan', st, pIdx, atk, target);
     if (ban) return { ok: false, error: atk.db.name + ' โจมตีไม่ได้ (' + ban + ')' };
+    if (!target || !target.kind) return { ok: false, error: 'ไม่มีเป้าหมาย' };
     if (target.kind === 'avatar') {
       const d = f.avatar.find(x => x.uid === target.uid);
       if (!d) return { ok: false, error: 'เป้าหาย -> การโจมตีสิ้นสุด' };
       if (cantTarget(st, pIdx, d)) return { ok: false, error: d.db.name + ' เลือกเป็นเป้าไม่ได้' };
+    } else if (target.kind === 'construct') {
+      if (!f.construct.find(x => x.uid === target.uid)) return { ok: false, error: 'เป้าหาย -> การโจมตีสิ้นสุด' };
+    } else if (target.kind !== 'life') {
+      return { ok: false, error: 'เป้าหมายไม่ถูกต้อง' };
     }
     atk.tapped = true;
     let extra = 0;
+    let backstabKill = false;
+    const seenSup = {};
     (supportUids || []).forEach(u => {
+      if (seenSup[u]) return;
+      seenSup[u] = true;
+      if (u === atkUid) return;
       const s = p.avatar.find(a => a.uid === u);
-      if (s && !s.tapped && (hasKwEff(s, 'สามัคคี') || hasKwEff(s, 'แทงหลัง'))) {
-        s.tapped = true;
-        extra += basePower(s) + equipBonus(s, st) + buffSum(s) + (fx('powerSelf', s, st) || 0) + (hasKwEff(s, 'แทงหลัง') ? 1 : 0);
-        slog(st, s.db.name + ' ' + (hasKwEff(s, 'แทงหลัง') ? 'แทงหลัง' : 'สามัคคี') + ' +' + extra);
+      // R18: silenced supporters cannot lend power; attacker silence does NOT block.
+      if (s && !s.tapped && !silenced(s, st)) {
+        const isSamakkee = hasKwEff(s, 'สามัคคี');
+        const isBackstab = hasKwEff(s, 'แทงหลัง');
+        // R17: no blanket same-color rule on สามัคคี — per-card text only.
+        if (isSamakkee || isBackstab) {
+          s.tapped = true;
+          extra += basePower(s) + equipBonus(s, st) + buffSum(s) + (fx('powerSelf', s, st) || 0) + (fx('powerAura', s, st) || 0) + (isBackstab ? 1 : 0);
+          // R15: different-color แทงหลัง supporter kills the attacker after the attack.
+          if (isBackstab && (s.db.color || '') !== (atk.db.color || '')) backstabKill = true;
+        }
       }
     });
-    // Snapshot (Layer 3): lock base+L1+L2
+    // Snapshot (Layer 3): lock base+L1+L2+aura at declare; L4 (battleBuff + post-declare buffs) floats.
     const aura0 = (fx('powerAura', atk, st) || 0) + (fx('powerSelf', atk, st) || 0);
     atk.snapshot = basePower(atk) + equipBonus(atk, st) + buffSum(atk) + aura0;
+    atk._buffAtDeclare = buffSum(atk);
+    atk._auraAtDeclare = aura0;
     // เมื่อโจมตี buffs (L4) — only as fallback when no scripted onAttack exists (prevents double +2 for SD01-002)
     let l4 = 0;
     let hasScriptedAttack = false;
@@ -912,7 +1050,12 @@
       parsePowerMods(atk.db.mainEffect).forEach(m => { l4 += (m.sign === '+' ? m.v : -m.v); });
     }
     atk.battleBuff = extra + l4;
+    atk._backstabKill = backstabKill;
+    // R12 identity: each declare gets one id; resolve consumes it exactly once.
+    st._attackSeq = (st._attackSeq || 0) + 1;
+    atk._attackId = st._attackSeq;
     let pow = atk.snapshot + atk.battleBuff;
+    if (pow < 0) pow = 0;
     slog(st, 'P' + (pIdx + 1) + ' ' + atk.db.name + ' โจมตี (snapshot ' + atk.snapshot + ' + buff ' + atk.battleBuff + ' = ' + pow + ')');
     st.battleCount++;
     // onAttack triggers (e.g. SD01-002 +2): scripted buffs applied after snapshot must still affect current attack
@@ -921,7 +1064,6 @@
     const buffAfter = buffSum(atk);
     if (buffAfter !== buffBefore) {
       const delta = buffAfter - buffBefore;
-      atk.battleBuff += delta;
       pow += delta;
       slog(st, atk.db.name + ' ทริกเกอร์โจมตี +' + delta + ' (power ' + pow + ')');
     }
@@ -943,21 +1085,41 @@
     if (ev.negated) return { ok: true, atk, power: pow, target, negated: true };
     return { ok: true, atk, power: pow, target };
   }
-  function redirectLomu(st, fIdx, newUid) {
+  // R16: โล่มนุษย์ (bodyguard redirect) is NOT คู่หู (pairing status, p.20).
+  // redirectPartner only answers โล่มนุษย์; คู่หู pairing lives elsewhere.
+  function redirectPartner(st, fIdx, newUid) {
     const f = st.players[fIdx];
     const r = f.avatar.find(a => a.uid === newUid);
     if (!r || r.tapped || !hasKwEff(r, 'โล่มนุษย์')) return { ok: false, error: 'โล่มนุษย์ใช้ไม่ได้' };
     r.tapped = true;
     return { ok: true, redirectTo: r };
   }
+  function cleanupAttacker(atk) {
+    if (!atk) return;
+    atk.battleBuff = 0; atk.snapshot = null;
+    delete atk._buffAtDeclare; delete atk._auraAtDeclare;
+  }
   function resolveBattle(st, pIdx, atk, target, powerArg) {
+    if (isGameOver(st)) return { ok: false, error: 'เกมจบแล้ว' };
     const blk = blockIfPending(st);
     if (blk) return blk;
+    if (!atk) return { ok: false, error: 'ไม่มีผู้โจมตี' };
+    // R12: one declare resolves exactly once — replayed/dup resolves rejected.
+    if (atk._attackId === undefined || atk._attackId === null) return { ok: false, error: 'การโจมตีนี้ resolve ไปแล้วหรือไม่เคย declare' };
     const p = st.players[pIdx], f = st.players[1 - pIdx];
+    if (atk.controller !== pIdx || p.avatar.indexOf(atk) < 0) { cleanupAttacker(atk); delete atk._attackId; return { ok: false, error: 'ผู้โจมตีไม่อยู่บนสนามแล้ว' }; }
+
+    // R13: snapshot (L3) frozen at declare; only post-declare L4 deltas float.
+    const curAura = (fx('powerAura', atk, st) || 0) + (fx('powerSelf', atk, st) || 0);
+    const baseAtDeclare = (atk.snapshot !== null && atk.snapshot !== undefined) ? atk.snapshot : effPower(atk, 0, st);
+    const buffDelta = buffSum(atk) - (atk._buffAtDeclare || 0);
+    const auraDelta = curAura - (atk._auraAtDeclare || 0);
+    let power = baseAtDeclare + (atk.battleBuff || 0) + buffDelta + auraDelta;
+    if (power < 0) power = 0;
     
-    // Layer 4: Recalculate power (React Magic might have buffed the attacker since Layer 3)
-    const power = effPower(atk, 0, st);
-    
+    // R15/R12: single-exit cleanup — battleBuff never leaks past LIFE/Construct/avatar,
+    // and a different-color แทงหลัง supporter kills the attacker afterwards.
+    try {
     if (target.kind === 'life') {
       if (!canAttackLife(st, atk, f) && !(target.forced)) return { ok: false, error: 'ตี LIFE ไม่ได้ (ยังมี Avatar)' };
       if (power <= 0) { slog(st, 'Power 0 ตี LIFE ได้แต่ไม่หงาย'); return { ok: true, flipped: false }; }
@@ -967,16 +1129,16 @@
         slog(st, 'P' + (pIdx + 1) + ' WIN (สาหัส)');
         return { ok: true, flipped: true, win: true };
       }
-      closed.open = true;
-      if (f.life.every(l => l.open)) { f.sahat = true; slog(st, 'P' + (f.idx + 1) + ' เข้าสู่สถานะสาหัส'); }
-      slog(st, 'หงาย LIFE ' + closed.card.db.name + ' (' + f.life.filter(l => l.open).length + '/5)');
-      fx('onLifeFlipped', st, f.idx, closed);
+      // R21: attack-caused flips queue LIFE; effect flips do not.
+      flipLifeAt(st, f.idx, 1, true, 'attack');
       return { ok: true, flipped: true, lifeCard: closed };
     }
     if (target.kind === 'construct') {
       const c = f.construct.find(x => x.uid === target.uid);
       if (!c) return { ok: false, error: 'เป้าหาย -> การโจมตีสิ้นสุด' };
-      if (power > (c.db.power || 0)) { f.construct.splice(f.construct.indexOf(c), 1); f.hell.push(c); slog(st, 'ทำลาย Construct ' + c.db.name); return { ok: true, destroyed: true }; }
+      const cp = effPower(c, 0, st);
+      // R26: construct destruction goes through the unified path (triggers/replacement).
+      if (power > cp) { destroyInst(st, c, 'ต่อสู้ (Construct)'); slog(st, 'ทำลาย Construct ' + c.db.name); return { ok: true, destroyed: true }; }
       slog(st, 'ตี Construct ไม่เข้า (ไม่ตายทั้งคู่)');
       return { ok: true, destroyed: false };
     }
@@ -992,13 +1154,24 @@
     if (ap === 0 && dp2 === 0) { slog(st, '0 vs 0 ไม่มีอะไรเกิดขึ้น'); return { ok: true }; }
     const atkLuk = hasKwEff(atk, 'ลูกฮึด'), defLuk = hasKwEff(d, 'ลูกฮึด');
     if (ap === dp2) {
+      // R14: 4-way equal table — defender-only ลูกฮึด kills the attacker.
       if (atkLuk && !defLuk) { if (destroyInst(st, d, 'ต่อสู้เสมอ+ลูกฮึด')) fx('onKill', st, atk, d); slog(st, 'เสมอแต่ลูกฮึด ' + atk.db.name + ' ชนะ'); }
+      else if (!atkLuk && defLuk) { if (destroyInst(st, atk, 'ต่อสู้เสมอ+ลูกฮึด (กัน)')) fx('onKill', st, d, atk); slog(st, 'เสมอแต่ลูกฮึด ' + d.db.name + ' (กัน) ชนะ'); }
+      else if (atkLuk && defLuk) { destroyInst(st, atk, 'ต่อสู้เสมอ'); destroyInst(st, d, 'ต่อสู้เสมอ'); slog(st, 'เสมอ ลูกฮึดทั้งคู่ ตายคู่'); }
       else { destroyInst(st, atk, 'ต่อสู้เสมอ'); destroyInst(st, d, 'ต่อสู้เสมอ'); slog(st, 'เสมอ ตายคู่'); }
     } else if (ap > dp2) { if (destroyInst(st, d, 'ต่อสู้')) fx('onKill', st, atk, d); slog(st, atk.db.name + '(' + ap + ') ชนะ ' + d.db.name + '(' + dp2 + ')'); }
     else { destroyInst(st, atk, 'ต่อสู้'); slog(st, atk.db.name + '(' + ap + ') แพ้ ' + d.db.name + '(' + dp2 + ')'); }
-    // clear battle buffs
-    atk.battleBuff = 0;
     return { ok: true };
+    } finally {
+      const kill = !!atk._backstabKill;
+      delete atk._attackId;
+      cleanupAttacker(atk);
+      if (kill && onField(st, atk)) {
+        destroyInst(st, atk, 'แทงหลัง (สีต่าง)');
+        slog(st, atk.db.name + ' ถูกแทงหลังทำลายหลังโจมตี (สี supporter ต่าง)');
+      }
+      delete atk._backstabKill;
+    }
   }
 
   // ---------- phases ----------
@@ -1008,28 +1181,45 @@
   }
   // T1 first player: Main -> End directly (no Battle Phase)
   function skipBattle(st) {
+    if (isGameOver(st)) return st.phase;
+    const blk = blockIfPending(st);
+    if (blk) return st.phase;
     fx('onEndStart', st, st.cur);
     st.phase = 'end';
     tickDelayed(st);
     return st.phase;
   }
   function nextPhase(st) {
-    if (st.winner) return st.phase;
+    if (isGameOver(st)) return st.phase;
+    // R08: no phase jumps while responses/frames/discards are pending.
+    const blk = blockIfPending(st);
+    if (blk) return st.phase;
     const order = ['draw', 'main', 'battle', 'end'];
     const i = order.indexOf(st.phase);
     if (st.phase === 'end') {
+      // R10: hand max is a choice — queue it and stay in end until resolved.
       const p = me(st);
-      while (p.hand.length > 7) { const d = p.hand.pop(); p.hell.push(d); }
+      if (p.hand.length > 7) {
+        pendingDiscard(st, st.cur, p.hand.length - 7);
+        return st.phase;
+      }
+      for (const pl of st.players) {
+        for (const a of pl.avatar) a.buffs = (a.buffs || []).filter(b => b.until !== 'endTurn');
+        for (const c of pl.construct) c.buffs = (c.buffs || []).filter(b => b.until !== 'endTurn');
+      }
       p.magicUsed = {};
       // reset อีกฝ่ายด้วย เพราะ React ที่ใช้ในเทิร์นนี้ไม่ควรค้างไปเทิร์นหน้า
       foe(st).magicUsed = {};
       st.cur = 1 - st.cur;
-      if (st.cur === 0) st.turn++;
+      if (st.cur === st._starter) st.turn++;
       st.phase = 'draw';
-      if (!(st.turn === 1 && st.cur === 0)) { /* draw happens on entering */ }
+      if (!(st.turn === 1 && st.cur === st._starter)) { /* draw happens on entering */ }
       doDrawPhase(st);
-      // turn1 P1 skips battle automatically in UI (phase jump allowed once)
     } else {
+      // R07: starter skips Battle on turn 1 — enforced here, not just in UI buttons.
+      if (st.phase === 'main' && st.turn === 1 && st.cur === st._starter) {
+        return skipBattle(st);
+      }
       if (st.phase === 'battle') fx('onEndStart', st, st.cur);
       st.phase = order[i + 1];
       if (st.phase === 'draw') doDrawPhase(st);
@@ -1041,12 +1231,14 @@
   }
 
   return {
-    newGame, submitRPS, mulligan, validateDecks, isBanned, doDrawPhase, drawOne, nextPhase, enterMain, skipBattle,
+    isGameOver, checkDeckZero,
+    setSeed, rng, newGame, submitRPS, mulligan, validateDecks, isBanned, doDrawPhase, drawOne, nextPhase, enterMain, skipBattle,
+    pendingDiscard, resolveDiscard,
     summonAvatar, buildConstruct, playMagic, checkPay, payCost, gemLimitFor, validateGem,
-    declareAttack, redirectLomu, resolveBattle, canAttackLife, cantTarget,
+    declareAttack, redirectPartner, resolveBattle, canAttackLife, cantTarget,
     destroyInst, exileInst, bounceInst, deckReturnInst, summonFromZone,
     attachEquip, detachEquipCentral, equippedToAvatarZone, gainControl, flipLifeAt, winGame,
-    addDelayed, runDelayed, findAvatar, onField, silenced, responsePending,
+    addDelayed, tickDelayed, runDelayed, findAvatar, onField, silenced, responsePending, blockIfPending,
     completeMagicResolve, completeSummonJuti, avatarLimitOk, magicLimitOk, checkModTarget,
     effPower, equipBonus, hasKw, hasKwEff, parseDraw, parsePowerMods, me, foe, slog, shuffle,
     removeFromZones,

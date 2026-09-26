@@ -64,20 +64,19 @@
     return picks;
   }
   function playMagicWithPay(E, FX, st, pIdx, card, extraOpts) {
+    // R01: Magic costs no GEM — only text costs (discard etc.) apply.
     const p = st.players[pIdx];
-    const pay = choosePay(E, p, card.db.cost || 0, card.db.color || '', card.db.name);
-    if (pay === null) return null;
     const opts = Object.assign({}, extraOpts || {});
-    opts.payUids = pay;
+    delete opts.payUids;
     // additional costs (authoritative preview via engine validation will reject if wrong)
     if (/ทิ้ง\s*Avatar[^\n]*เทพ/.test(card.db.mainEffect || '')) {
-      const c = p.hand.find(x => pay.indexOf(x.uid) < 0 && x.uid !== card.uid && x.db.type === 'Avatar' && x.db.symbol === 'เทพ');
+      const c = p.hand.find(x => x.uid !== card.uid && x.db.type === 'Avatar' && x.db.symbol === 'เทพ');
       if (!c) return null;
       opts.discardUids = [c.uid];
     } else if (/ทิ้งการ์ดบนมือ\s*(\d+)\s*ใบ/.test(card.db.mainEffect || '')) {
       const m = /ทิ้งการ์ดบนมือ\s*(\d+)\s*ใบ/.exec(card.db.mainEffect || '');
       const n = m ? +m[1] : 1;
-      const cands = p.hand.filter(x => x.uid !== card.uid && pay.indexOf(x.uid) < 0).slice(0, n);
+      const cands = p.hand.filter(x => x.uid !== card.uid).slice(0, n);
       if (cands.length < n) return null;
       opts.discardUids = cands.map(x => x.uid);
     }
@@ -163,16 +162,27 @@
       // defender lomu? bot as attacker can't control; resolve directly (UI handles human lomu)
       const res = E.resolveBattle(st, pIdx, a, target, dec.power);
       acts.push('attack ' + a.db.name + '->' + target.kind);
-      if (st.winner) break;
+      if (st.winner!==null&&st.winner!==undefined) break;
     }
     return acts;
   }
   function botDiscard(E, st, pIdx) {
+    // R10: hand-max is a queued choice — resolve through the engine, never raw pop.
+    if (st.pendingDiscards && st.pendingDiscards.length) {
+      const q = st.pendingDiscards.find(d => d.owner === pIdx);
+      if (q && E.resolveDiscard) {
+        const p = st.players[pIdx];
+        const sorted = p.hand.slice().sort((a, b) => ((a.db.gem || 0) + (a.db.power || 0)) - ((b.db.gem || 0) + (b.db.power || 0)));
+        const r = E.resolveDiscard(st, pIdx, sorted.slice(0, q.count).map(c => c.uid));
+        return r.ok ? ['discard-choice ' + q.count] : ['discard-fail'];
+      }
+    }
     const p = st.players[pIdx];
     while (p.hand.length > 7) {
       p.hand.sort((a, b) => ((a.db.gem || 0) + (a.db.power || 0)) - ((b.db.gem || 0) + (b.db.power || 0)));
       const d = p.hand.shift(); p.hell.push(d);
     }
+    return [];
   }
   function botMagic(E, st, pIdx, FX) {
     const acts = [];
@@ -229,7 +239,7 @@
     const p = st.players[pIdx];
     const insts = p.avatar.concat(p.hand);
     for (const inst of insts) {
-      if (st.winner) break;
+      if (st.winner!==null&&st.winner!==undefined) break;
       let abs = [];
       try { abs = FX.listActivated(st, pIdx, inst); } catch (e) { continue; }
       for (const ab of abs) {
