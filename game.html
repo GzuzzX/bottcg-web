@@ -272,7 +272,7 @@ body.duel-active .life{width:var(--field-card-w);height:auto;aspect-ratio:5/7;mi
 
     <!-- Foe Field -->
     <div class="field-half field-foe">
-      <div style="text-align:center; font-size:12px; color:#888;">คู่ต่อสู้: <span id="foeInfo"></span></div>
+      <div style="text-align:center; font-size:12px; color:#888;">คู่ต่อสู้: <span id="foeInfo"></span> <button id="foeHellBtn" style="font-size:11px;min-height:28px">ดูนรก</button></div>
       <div id="foeHandArea" class="opponent-hand-area" aria-label="มือคู่ต่อสู้">
         <span class="opponent-hand-label">มือคู่ต่อสู้ <b id="foeHandN">0</b></span>
         <div id="foeHand" class="opponent-hand-cards" aria-live="polite"></div>
@@ -316,7 +316,7 @@ body.duel-active .life{width:var(--field-card-w);height:auto;aspect-ratio:5/7;mi
         <div class="zone-box" style="flex:0.5;"><div class="row" id="meLife"></div></div>
         <div class="zone-box" style="flex:2;"><div class="row" id="meCons"></div></div>
       </div>
-      <div style="text-align:center; font-size:12px; color:#888; margin-top:4px;">เรา: <span id="meInfo"></span></div>
+      <div style="text-align:center; font-size:12px; color:#888; margin-top:4px;">เรา: <span id="meInfo"></span> <button id="meHellBtn" style="font-size:11px;min-height:28px">ดูนรก</button></div>
     </div>
 
     <!-- Hand Area -->
@@ -340,7 +340,7 @@ body.duel-active .life{width:var(--field-card-w);height:auto;aspect-ratio:5/7;mi
 <script src="storage.js?v=1790336642033"></script>
 <script src="starter-decks.js?v=1790336642033"></script>
 <script src="engine.js?v=1790336625331"></script>
-<script src="ai.js?v=1790336642033"></script>
+<script src="ai.js?v=bot-end-fix-1"></script>
 <script src="effects.js?v=1790336642033"></script>
 <script src="card-scripts.js?v=1790336642033"></script>
 <script src="card-scripts-auto.js?v=1790336642033"></script>
@@ -497,7 +497,7 @@ function startLocalGame(d1, d2) {
   document.getElementById('deckInfo').textContent='P1 50+5 vs P2 50+5 | err: '+(e1.concat(e2).join('; ')||'none');
   viewSide = 0; render();
   FX.setHumanSides(mode==='ai' ? [0] : [0, 1]);
-  if(mode==='ai'&&st.cur===1) setTimeout(botTurn,600);
+  scheduleBotTurn();
   checkRPS();
 }
 // R02: server-authoritative online start — same decks/seed/UIDs on both machines.
@@ -538,6 +538,8 @@ document.getElementById('btnStart').onclick=()=>{
 document.getElementById('btnNew').onclick=()=>location.reload();
 document.getElementById('btnPhase').onclick=()=>{
   if(!st||(st.winner!==null&&st.winner!==undefined)) return;
+  if(mode==='ai'&&st.cur===1) return; // bot owns its turn
+  if((st.pendingChoices&&st.pendingChoices.length)||E.responsePending(st)) return;
   // R07: engine owns the starter skip; UI only forwards intent. R34: replicate
   // the SAME act online so both machines take the same transition.
   var willSkip = (st.phase==='main'&&st.turn===1&&st.cur===st._starter);
@@ -546,7 +548,7 @@ document.getElementById('btnPhase').onclick=()=>{
   if(SFX.phase) SFX.phase();
   if(mode==='online') sendAction(willSkip ? { act: 'skipBattle' } : { act: 'nextPhase' });
   if(st.phase==='draw'&&false){} // draw handled inside nextPhase on turn pass
-  if(mode==='ai'&&st.cur===1&&(st.winner===null||st.winner===undefined)) setTimeout(botTurn,600);
+  scheduleBotTurn();
   if(mode==='hot') {
     viewSide=st.cur;
     showTurnOverlay();
@@ -554,17 +556,57 @@ document.getElementById('btnPhase').onclick=()=>{
   }
   render();
 };
+let botTurnTimer = null;
+function botHasPendingDecision(){
+  return E.responsePending(st)||!!(st.pendingChoices&&st.pendingChoices.length);
+}
+function scheduleBotTurn(delay=600){
+  if(mode!=='ai'||!st||st.cur!==1||E.isGameOver(st)) return;
+  if(!['draw','main','battle','end'].includes(st.phase)||botHasPendingDecision()) return;
+  if(botTurnTimer!==null) return;
+  botTurnTimer=setTimeout(()=>{ botTurnTimer=null; botTurn(); },delay);
+}
 function botTurn(){
-  if(!st||(st.winner!==null&&st.winner!==undefined)||st.cur!==1) return;
-  // AI turns stop for human decisions (pending responses/frames)
-  if((st.pendingResponses&&st.pendingResponses.length)||(st._frames&&st._frames.length)){ render(); return; }
-  // bot plays main (pass FX for authoritative Magic payments)
-  if(st.phase==='draw'){ E.nextPhase(st); if(st.phase!=='main'){ render(); return; } }
-  if(st.phase==='main'){ try{ BOT.botMain(E,st,1,FX); }catch(e){ try{ BOT.botMain(E,st,1); }catch(e2){} } try{ BOT.botAbilities(E,FX,st,1); }catch(e){} if((st.pendingResponses&&st.pendingResponses.length)||(st._frames&&st._frames.length)){ render(); return; } E.nextPhase(st); render(); if(st.phase!=='battle'){ return; } }
-  if(st.phase==='battle'){ if(!(st.turn===1&&st.cur===st._starter)){ try{ BOT.botBattle(E,st,1); }catch(e){} } if((st.pendingResponses&&st.pendingResponses.length)||(st._frames&&st._frames.length)){ render(); return; } E.nextPhase(st); render(); if(st.phase!=='end'){ return; } }
-  if(st.phase==='end'){ BOT.botDiscard(E,st,1); if((st.pendingDiscards&&st.pendingDiscards.length)){ try{ BOT.botDiscard(E,st,1); }catch(e){} drainDiscard(true); } E.nextPhase(st); }
+  if(mode!=='ai'||!st||E.isGameOver(st)||st.cur!==1) return;
+  if(botHasPendingDecision()){ render(); drainQueues(); return; }
+  const beforePhase=st.phase, beforeTurn=st.turn, beforeCur=st.cur;
+  let waitingForDefender=false;
+  try {
+    // Advance one phase per tick. The starter's first Main skips Battle and
+    // lands directly in End, so never assume a Main -> Battle transition.
+    if(st.phase==='draw') E.nextPhase(st);
+    else if(st.phase==='main'){
+      BOT.botMain(E,st,1,FX);
+      if(!botHasPendingDecision()) BOT.botAbilities(E,FX,st,1);
+      if(!botHasPendingDecision()) E.nextPhase(st);
+    } else if(st.phase==='battle'){
+      const actions=BOT.botBattle(E,st,1,offerHumanShield)||[];
+      waitingForDefender=actions.includes('wait-defender');
+      if(!waitingForDefender&&!botHasPendingDecision()) E.nextPhase(st);
+    } else if(st.phase==='end'){
+      const hasDiscard=()=>!!(st.pendingDiscards||[]).find(d=>d.owner===1);
+      if(!hasDiscard()) E.nextPhase(st); // may queue a 7-card discard choice
+      if(hasDiscard()){
+        BOT.botDiscard(E,st,1);
+        if(hasDiscard()) throw new Error('บอทเลือกทิ้งไพ่เกิน 7 ไม่สำเร็จ');
+        E.nextPhase(st);
+      }
+    }
+  } catch(e){
+    console.error('bot turn failed',e);
+    E.slog(st,'บอทหยุดเพราะข้อผิดพลาด: '+e.message);
+    render();
+    return;
+  }
   render();
-  if(st.cur===1&&(st.winner===null||st.winner===undefined)){ setTimeout(botTurn,600); }
+  if(waitingForDefender) return;
+  if(botHasPendingDecision()){ drainQueues(); return; }
+  if(!E.isGameOver(st)&&st.cur===beforeCur&&st.turn===beforeTurn&&st.phase===beforePhase){
+    E.slog(st,'บอทไม่สามารถข้ามเฟส '+st.phase+' ได้ — ตรวจคิว/ข้อผิดพลาด');
+    render();
+    return; // avoid an endless timer loop if an unknown choice blocks progression
+  }
+  scheduleBotTurn();
 }
 // ---------- rendering ----------
 let lastPreviewDb = null;
@@ -601,6 +643,19 @@ function openInspector() {
   }
   h += '<button id="mX" style="width:100%;margin-top:8px;min-height:44px">ปิด</button>';
   mbox(h);
+  document.getElementById('mX').onclick = mclose;
+}
+// ดูกองนรก (Hell Zone เป็น public info) — กดดูได้ทั้งของเราและคู่ต่อสู้ แตะใบไหนดูรายละเอียด
+function openHellViewer(pIdx){
+  if(!st) return;
+  const p = st.players[pIdx];
+  let h = '<h3 style="margin-top:0">นรก P' + (pIdx + 1) + ' (' + p.hell.length + ' ใบ)</h3>';
+  if(!p.hell.length) h += '<p class="hint">ยังว่าง</p>';
+  h += '<div class="row" id="hellView" style="max-height:40vh;max-height:40dvh;overflow:auto"></div>';
+  h += '<button id="mX" style="width:100%;margin-top:8px;min-height:44px">ปิด</button>';
+  mbox(h);
+  const box = document.getElementById('hellView');
+  p.hell.forEach(c=>{ const m=cardMini(c,''); m.onclick=()=>updateInspector(c.db||c); box.appendChild(m); });
   document.getElementById('mX').onclick = mclose;
 }
 function renderOpponentHand(count) {
@@ -655,7 +710,7 @@ function cardMini(c,extra){
         E.submitRPS(st, pIdx, btn.dataset.choice);
         if (mode === 'online') sendAction({ act: 'rps', choice: btn.dataset.choice });
         afterAction();
-        if (mode === 'ai' && st.cur === 1) setTimeout(botTurn, 600);
+        scheduleBotTurn();
         checkRPS();
       };
     });
@@ -704,13 +759,16 @@ function render(){
   if(st.phase === 'main') document.getElementById('ph-main').classList.add('active');
   if(st.phase === 'battle') document.getElementById('ph-battle').classList.add('active');
   if(st.phase === 'end') document.getElementById('ph-end').classList.add('active');
-  document.getElementById('btnPhase').disabled=(st.winner!==null&&st.winner!==undefined);
+  document.getElementById('btnPhase').disabled=(st.winner!==null&&st.winner!==undefined)||(mode==='ai'&&st.cur===1)||botHasPendingDecision();
   const showMe = mode==='ai'?st.players[0]:st.players[viewSide];
   const showFoe = mode==='ai'?st.players[1]:st.players[1-viewSide];
   const myTurn = st.cur===showMe.idx;
   renderOpponentHand(showFoe.hand.length);
   document.getElementById('meInfo').textContent=`P${showMe.idx+1} มือ${showMe.hand.length} deck${showMe.main.length} นรก${showMe.hell.length}${showMe.sahat?' สาหัส!':''}${myTurn?' (เทิร์นเรา)':''}`;
   document.getElementById('foeInfo').textContent=`P${showFoe.idx+1} มือ${showFoe.hand.length} deck${showFoe.main.length} นรก${showFoe.hell.length}${showFoe.sahat?' สาหัส!':''}`;
+  // Hell Zone เป็น public info (กฎหน้า 2) — กดดูการ์ดในนรกได้ทั้งสองฝ่าย
+  document.getElementById('foeHellBtn').onclick=()=>openHellViewer(showFoe.idx);
+  document.getElementById('meHellBtn').onclick=()=>openHellViewer(showMe.idx);
   // avatars
   const fa=document.getElementById('foeAvatar'); fa.innerHTML='';
   showFoe.avatar.forEach(a=>{ const m=cardMini(a,(a.tapped?' tapped':'')); m.onclick=()=>onTargetFoeAvatar(a); fa.appendChild(m); });
@@ -1004,18 +1062,20 @@ function openPicks(inst,ab,choiceIdx,onConfirm,meOverride){
     doExec(picks);
   };
 }
-function afterAction(){ drainQueues(); render(); }
+function afterAction(){ drainQueues(); render(); scheduleBotTurn(); }
 window.resumeAttackFrame = function(st, frame) {
   setTimeout(() => {
     const atk = st.players[frame.owner].avatar.find(a => a.uid === frame.atkUid);
-    if (!atk) return;
+    if (!atk) { afterAction(); return; }
     const ev = (st._evStack||[]).find(e=>e.id===frame.evId) || {negated:false};
-    if (ev.negated) { atk.battleBuff=0; atkUid=null; supSet=new Set(); render(); return; }
+    if (ev.negated) { atk.battleBuff=0; atkUid=null; supSet=new Set(); afterAction(); return; }
     const p = st.players[frame.owner];
     
     if (frame.target.kind === 'avatar') {
       const df = st.players[1-frame.owner].avatar.find(a=>a.uid===frame.target.uid);
+      atkUid=frame.atkUid; supSet=new Set(frame.supUids||[]);
       if (df) finishAttackVsAvatar(p, atk, df, frame.power);
+      else { atkUid=null; supSet=new Set(); afterAction(); }
     } else if (frame.target.kind === 'construct') {
       const r = E.resolveBattle(st, frame.owner, atk, frame.target, frame.power);
       atkUid=null; supSet=new Set(); if(!r.ok) alert(r.error);
@@ -1023,6 +1083,7 @@ window.resumeAttackFrame = function(st, frame) {
       if(r.ok && mode === 'online') sendAction({ act: 'attack', atkUid: frame.atkUid, supUids: frame.supUids||[], target: frame.target });
       afterAction();
     } else if (frame.target.kind === 'life') {
+      if(mode==='ai'&&frame.owner===1&&offerHumanShield(atk,frame.target,{power:frame.power},frame.supUids||[])) return;
       const r = E.resolveBattle(st, frame.owner, atk, frame.target, frame.power);
       atkUid=null; supSet=new Set(); if(!r.ok) alert(r.error);
       if(SFX.attack) SFX.attack();
@@ -1103,15 +1164,6 @@ function drainQueues(){
     }
   } finally { if(document.getElementById('modal').style.display!=='flex') _draining=false; }
 }
-// R10 bot helper: resolve the bot's own pending discard via engine choice.
-function drainDiscard(isBot){
-  if(!st||!st.pendingDiscards||!st.pendingDiscards.length) return;
-  if(isBot && typeof BOT!=='undefined' && BOT.botDiscard){
-    try{ BOT.botDiscard(E,st,1); }catch(e){}
-  }
-  if(mode==='online'&&st.pendingDiscards&&!st.pendingDiscards.length){ /* resolved locally; broadcast done by caller modal */ }
-  render();
-}
 function defaultEvTarget(op){ return false; } // responses default target to event source in executor
 function openQueuedPicks(q,ab){
   const inst = FX.findInst(st,q.uid);
@@ -1143,7 +1195,43 @@ function doResolve(d){
   atkUid=null; supSet=new Set(); if(!r.ok) alert(r.error);
   if(SFX.attack) SFX.attack();
   if(r.ok && mode === 'online') sendAction({ act: 'attack', atkUid: au, supUids: sup, target: {kind:'avatar', uid:d.uid} });
-  render();
+  afterAction();
+}
+function offerHumanShield(atk,target,dec,supUids){
+  if(mode!=='ai'||st.cur!==1||(target.kind!=='avatar'&&target.kind!=='life')) return false;
+  const human=st.players[0];
+  const shields=human.avatar.filter(x=>!x.tapped&&E.hasKwEff(x,'โล่มนุษย์')&&
+    (target.kind!=='avatar'||x.uid!==target.uid));
+  if(!shields.length) return false;
+  const defender=target.kind==='avatar'?human.avatar.find(x=>x.uid===target.uid):null;
+  if(target.kind==='avatar'&&!defender) return false;
+  atkUid=atk.uid; supSet=new Set(supUids||[]);
+  if(target.kind==='avatar') finishAttackVsAvatar(st.players[1],atk,defender,dec.power);
+  else finishBotLifeWithShield(atk,dec.power,shields);
+  return true;
+}
+function finishBotLifeWithShield(atk,power,shields){
+  function resolve(target){
+    const r=E.resolveBattle(st,1,atk,target,power);
+    atkUid=null; supSet=new Set();
+    if(!r.ok) alert(r.error);
+    if(SFX.attack) SFX.attack();
+    if(r.lifeCard){
+      alert('หงาย LIFE: '+r.lifeCard.card.db.name+'\n'+(r.lifeCard.card.db.mainEffect||''));
+      if(SFX.lifeFlip) SFX.lifeFlip();
+    }
+    afterAction();
+  }
+  let h='<h3>โล่มนุษย์ — ป้องกันการโจมตี LIFE?</h3>';
+  shields.forEach(x=>{ h+='<button style="width:100%;margin:4px 0" class="lomu-life" data-uid="'+x.uid+'">'+x.db.name+'</button>'; });
+  h+='<button id="lomuLifePass" style="width:100%;margin:4px 0">ไม่รับแทน</button>';
+  mbox(h);
+  document.getElementById('lomuLifePass').onclick=()=>{ mclose(); resolve({kind:'life'}); };
+  document.querySelectorAll('.lomu-life').forEach(b=>{ b.onclick=()=>{
+    const rr=E.redirectPartner(st,0,+b.dataset.uid);
+    if(!rr.ok){ alert(rr.error); return; }
+    mclose(); resolve({kind:'avatar',uid:rr.redirectTo.uid});
+  }; });
 }
 function finishAttackVsAvatar(p,atk,d,power){
   const f=st.players[1-st.cur];
